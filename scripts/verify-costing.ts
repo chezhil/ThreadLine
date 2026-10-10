@@ -5,7 +5,7 @@
 //   npx tsx scripts/verify-costing.ts
 
 import { execSync } from "child_process";
-import { existsSync, rmSync } from "fs";
+import { closeSync, existsSync, openSync, rmSync } from "fs";
 import path from "path";
 
 const DB_FILE = path.join(__dirname, "..", "prisma", "verify-costing.db");
@@ -24,6 +24,8 @@ const ist = (s: string) => new Date(`${s}+05:30`);
 
 async function main() {
   for (const f of [DB_FILE, `${DB_FILE}-journal`]) if (existsSync(f)) rmSync(f);
+  // Ensure SQLite has a writable file before the Prisma schema engine opens it.
+  closeSync(openSync(DB_FILE, "w"));
   execSync("npx prisma migrate deploy", { env: { ...process.env, DATABASE_URL }, stdio: "ignore" });
   process.env.DATABASE_URL = DATABASE_URL;
 

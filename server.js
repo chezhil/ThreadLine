@@ -10,7 +10,9 @@ const { Server } = require("socket.io");
 const dev = process.env.NODE_ENV !== "production";
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-const app = next({ dev });
+// Windows environments without junction privileges cannot run Turbopack's
+// Prisma externalization. Webpack uses regular files and keeps Socket.io live.
+const app = next({ dev, webpack: dev && process.platform === "win32" });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {

@@ -16,6 +16,18 @@ model User {
   role         String // owner | storekeeper | floor_supervisor | qc_inspector
   passwordHash String
   createdAt    DateTime @default(now())
+  sessions     Session[]
+}
+
+model Session {
+  tokenHash String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Supplier {

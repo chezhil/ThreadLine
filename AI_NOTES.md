@@ -329,6 +329,21 @@ UI kit); the other modules were adapted to it. No teammate's feature was removed
   updates live over the socket), QC reject with defect validation, loading a
   truck, and the dashboard/payments/audit views of the result.
 
+### Post-integration hardening
+- Shared auth now stores random hashed session tokens in the additive `Session`
+  model; the old user-ID cookie was forgeable. Login creates a seven-day session,
+  logout revokes it, and protected routes reject expired or missing sessions.
+- The Windows custom server selects Webpack in development because Turbopack's
+  Prisma externalization needs junction creation, which can be denied by Windows
+  sandbox policies. Production build behavior is unchanged.
+- A PR verification workflow now runs migrations, seed, static checks, a
+  production build and every module's verification script on Linux. Local
+  production bundling was blocked by Windows sandbox file permissions.
+- `npm audit --omit=dev` reports no production dependency vulnerabilities.
+  The full audit reports five high findings through the development-only
+  `eslint-config-next` → `braces` chain; npm currently offers no non-breaking
+  fix for that chain.
+
 ### Still open
 - Ollama never ran for real here (model registry blocked); assistant was tested
   against a mock and the keyword fallback.
