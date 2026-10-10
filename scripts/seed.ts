@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
+import { seedProduction } from "./seed-production";
 import { seedAccounts } from "./seed-accounts";
 
 const db = new PrismaClient();
@@ -133,6 +134,13 @@ async function main() {
       },
     });
   }
+
+  // ---------------------------------------------------------------------
+  // Module 2 (Naman) — machines, work orders and production logs.
+  // Implementation in scripts/seed-production.ts.
+  // ---------------------------------------------------------------------
+  console.log("Seeding production...");
+  await seedProduction(db);
 
   // ---------------------------------------------------------------------
   // Module 4 (Devacharan) — workers, a month of attendance, expenses and

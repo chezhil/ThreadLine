@@ -1,5 +1,4 @@
-import { ModulePlaceholder } from "@/components/layout/ModulePlaceholder";
+import { FloorBoardClient } from "@/components/production/FloorBoardClient";
+import "../production.css";
 
-export default function Page() {
-  return <ModulePlaceholder owner="Module 2 (Naman)" feature="Live machine floor board" />;
-}
+export default function FloorBoardPage() { return <FloorBoardClient />; }

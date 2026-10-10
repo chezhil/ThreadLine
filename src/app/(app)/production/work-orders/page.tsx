@@ -1,5 +1,4 @@
-import { ModulePlaceholder } from "@/components/layout/ModulePlaceholder";
+import { WorkOrdersClient } from "@/components/production/WorkOrdersClient";
+import "../production.css";
 
-export default function Page() {
-  return <ModulePlaceholder owner="Module 2 (Naman)" feature="Work orders" />;
-}
+export default function WorkOrdersPage() { return <WorkOrdersClient />; }
