@@ -62,8 +62,10 @@ export function writeTransaction<T>(
   const fn = typeof a === "function" ? a : b!;
   const run = () =>
     client.$transaction(async (tx) => {
-      // A write that touches no rows still takes the write lock.
-      await tx.$executeRawUnsafe('UPDATE "User" SET "id" = "id" WHERE 0');
+      // A write that touches no rows still takes the write lock. Postgres
+      // requires an actual boolean here (unlike SQLite, which accepted the
+      // integer 0 as falsy) — `WHERE 0` errors with 42804 on Postgres.
+      await tx.$executeRawUnsafe('UPDATE "User" SET "id" = "id" WHERE false');
       return fn(tx);
     });
   const prev = globalForLock.threadlineWriteQueue ?? Promise.resolve();
