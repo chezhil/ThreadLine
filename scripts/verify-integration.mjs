@@ -9,6 +9,7 @@
 // run it on a scratch/dev database. Prints PASS/FAIL; exit code 1 on failure.
 
 const BASE = process.env.BASE ?? "http://localhost:3000";
+const loginUsers = new Map();
 let failures = 0;
 let passes = 0;
 
@@ -30,6 +31,7 @@ async function login(name, password) {
   });
   const cookie = res.headers.get("set-cookie")?.split(";")[0];
   if (!res.ok || !cookie) throw new Error(`login as ${name} failed (${res.status})`);
+  loginUsers.set(name, (await res.json()).user.id);
   return cookie;
 }
 
@@ -52,6 +54,13 @@ const store = client(await login("storekeeper", "store123"));
 const floor = client(await login("floor", "floor123"));
 const qc = client(await login("qc", "qc123"));
 const anon = client(null);
+
+// A user ID must never authenticate as a session, and logout revokes its token.
+const forged = client(`threadline_session=${encodeURIComponent(loginUsers.get("owner"))}`);
+check("forged session cookie → 401", (await forged("GET", "/api/machines")).status === 401);
+const extraSession = client(await login("owner", "owner123"));
+check("logout succeeds", (await extraSession("POST", "/api/auth/logout")).status === 200);
+check("logged-out token → 401", (await extraSession("GET", "/api/machines")).status === 401);
 
 // --- who can do what ---------------------------------------------------------
 check("anon: rolls → 401", (await anon("GET", "/api/rolls")).status === 401);
