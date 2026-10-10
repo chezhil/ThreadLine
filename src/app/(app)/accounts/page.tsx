@@ -1,5 +1,5 @@
-import { ModulePlaceholder } from "@/components/layout/ModulePlaceholder";
+import { MonthEndClient } from "@/components/accounts/MonthEndClient";
 
-export default function Page() {
-  return <ModulePlaceholder owner="Module 4 (Devacharan)" feature="Accounts" />;
+export default function MonthEndPage() {
+  return <MonthEndClient />;
 }
