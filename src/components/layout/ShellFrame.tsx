@@ -5,7 +5,7 @@ import { useShell } from "./ShellProvider";
 const ROOT_FONT: Record<string, string> = { small: "87.5%", default: "100%", large: "112.5%" };
 // Page and scrollbar colours that live outside the frame (the <html>/<body>
 // the browser paints behind and around it).
-const DARK_PAGE = "html{color-scheme:dark}body{background:#0f1216}";
+const DARK_PAGE = "html{color-scheme:dark}body{background:#050505}";
 
 // The outermost box of the signed-in app. It carries the user's theme, text
 // size and motion preferences as data attributes, which globals.css turns

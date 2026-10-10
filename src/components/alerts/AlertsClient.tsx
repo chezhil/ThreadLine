@@ -70,8 +70,10 @@ export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
-        <Input aria-label="Search alerts" placeholder="Search alert text" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-[1fr_auto_auto_auto]">
+        <div className="sm:col-span-3 xl:col-span-1">
+          <Input aria-label="Search alerts" placeholder="Search alert text" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
         <Select aria-label="Show" value={show} onChange={(e) => setShow(e.target.value)} options={[{ value: "unread", label: "Unread" }, { value: "all", label: "All" }]} />
         <Select
           aria-label="Severity"

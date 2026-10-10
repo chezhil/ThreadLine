@@ -48,14 +48,14 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Account menu for ${name}`}
-        className="group flex items-center gap-2.5 rounded-md py-1 pl-1.5 pr-2 transition-colors hover:bg-surface-container"
+        className="group flex shrink-0 items-center gap-2.5 rounded-md py-1 pl-1.5 pr-1 transition-colors hover:bg-surface-container md:pr-2"
       >
-        <span className="hidden flex-col text-right leading-tight sm:flex">
+        <span className="hidden flex-col text-right leading-tight xl:flex">
           <span className="max-w-40 truncate text-[13px] font-semibold text-foreground">{name}</span>
           <span className="label-caps-sm text-gray-500">{ROLE_LABEL[user.role].title}</span>
         </span>
         <Avatar name={name} src={user.avatar} className="h-11 w-11 text-base ring-2 ring-transparent transition-shadow group-hover:ring-brand/30" />
-        <ChevronDown className={`hidden h-4 w-4 text-gray-500 transition-transform sm:block ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+        <ChevronDown className={`hidden h-4 w-4 text-gray-500 transition-transform md:block ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
 
       {open && (

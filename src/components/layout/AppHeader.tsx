@@ -27,44 +27,48 @@ export function AppHeader({ role, userId }: { role: Role; userId: string }) {
   return (
     <header className="sticky top-0 z-30">
       <div className="flex h-14 items-center justify-between gap-3 border-b border-border bg-white px-4">
-        <div className="flex min-w-0 items-center gap-2">
+        {/* The title gives way first: it truncates, and the unit label only
+            appears where there is room, so it can never run under the controls. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <Link href={ROLE_HOME[role]} aria-label="ThreadLine home" className="shrink-0 md:hidden">
             <BrandMark className="h-7 w-7" />
           </Link>
-          <span className="label-caps hidden text-gray-500 sm:inline">Everest Unit-1</span>
-          <span className="hidden text-border-strong sm:inline">/</span>
+          <span className="label-caps hidden shrink-0 whitespace-nowrap text-gray-500 2xl:inline">Everest Unit-1</span>
+          <span className="hidden shrink-0 text-border-strong 2xl:inline">/</span>
           <span className="truncate text-[13px] font-medium text-foreground">{title}</span>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 xl:gap-3">
           <span
-            className={`label-caps-sm hidden items-center gap-1.5 border px-2 py-1 lg:inline-flex ${
+            className={`label-caps-sm hidden shrink-0 items-center gap-1.5 whitespace-nowrap border px-2 py-1 md:inline-flex ${
               live ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-border bg-surface-low text-gray-500"
             }`}
-            title={live ? "Live updates connected" : "Live updates reconnecting"}
+            title={live ? "Mill telemetry: live updates connected" : "Mill telemetry: live updates reconnecting"}
           >
             <span className="relative flex h-2 w-2">
               {live && <span className="absolute inline-flex h-full w-full animate-live-ping rounded-full bg-emerald-400 opacity-75" />}
               <span className={`relative inline-flex h-2 w-2 rounded-full ${live ? "bg-emerald-600" : "bg-gray-400"}`} />
             </span>
-            Mill telemetry: {live ? "Live" : "Offline"}
+            {/* Just the dot until there's room for the words. */}
+            <span className="hidden xl:inline">Mill telemetry: {live ? "Live" : "Offline"}</span>
+            <span className="sr-only xl:hidden">Mill telemetry: {live ? "Live" : "Offline"}</span>
           </span>
-          <span className="hidden items-center gap-1.5 text-gray-500 md:inline-flex">
+          <span className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap text-gray-500 lg:inline-flex">
             <Clock className="h-4 w-4" aria-hidden="true" />
             <LiveClock className="text-[13px] font-medium text-foreground" />
           </span>
-          <span className="hidden h-4 w-px bg-border-strong md:block" aria-hidden="true" />
+          <span className="hidden h-4 w-px bg-border-strong lg:block" aria-hidden="true" />
           <SyncStatus canBackup={role === "owner"} userId={userId} />
           <button
             type="button"
             onClick={() => setPaletteOpen(true)}
             aria-label="Open command menu"
             title="Command menu (Ctrl K)"
-            className="hidden items-center gap-2 rounded-md border border-border bg-surface-low px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:border-border-strong hover:text-foreground lg:inline-flex"
+            className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border bg-surface-low p-1.5 text-xs text-gray-500 transition-colors hover:border-border-strong hover:text-foreground md:inline-flex 2xl:px-2.5"
           >
-            <Command className="h-3.5 w-3.5" aria-hidden="true" />
-            Search or jump to…
-            <kbd className="border border-border bg-white px-1 text-[10px] font-semibold">Ctrl K</kbd>
+            <Command className="h-4 w-4 2xl:h-3.5 2xl:w-3.5" aria-hidden="true" />
+            <span className="hidden 2xl:inline">Search or jump to…</span>
+            <kbd className="hidden border border-border bg-white px-1 text-[10px] font-semibold 2xl:inline">Ctrl K</kbd>
           </button>
           <NotificationBell />
           <UserMenu />

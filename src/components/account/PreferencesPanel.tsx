@@ -18,7 +18,7 @@ const THEME_CARDS: { value: Preferences["theme"]; label: string; hint: string; i
 function ThemeThumb({ mode }: { mode: Preferences["theme"] }) {
   const palette = (dark: boolean) =>
     dark
-      ? { bg: "#0f1216", panel: "#161a20", line: "#2a303a", bar: "#4a66dd", text: "#8a93a3" }
+      ? { bg: "#050505", panel: "#0e0e0e", line: "#262626", bar: "#4a66dd", text: "#6b6b6b" }
       : { bg: "#f2f4f6", panel: "#ffffff", line: "#e0e3e5", bar: "#00288e", text: "#c4c5d5" };
   const half = (dark: boolean) => {
     const p = palette(dark);

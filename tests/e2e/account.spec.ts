@@ -97,7 +97,7 @@ test("dark theme applies at once and survives a reload", async ({ page }) => {
   await page.getByRole("radio", { name: /Dark/ }).first().click();
   await expect(frame).toHaveAttribute("data-theme", "dark");
   const bg = await page.evaluate(() => getComputedStyle(document.querySelector("[data-theme]")!).backgroundColor);
-  expect(bg).toBe("rgb(15, 18, 22)");
+  expect(bg).toBe("rgb(5, 5, 5)");
   await page.waitForTimeout(700);
   await page.reload();
   await expect(page.locator("[data-theme]").first()).toHaveAttribute("data-theme", "dark");

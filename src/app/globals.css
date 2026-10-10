@@ -197,42 +197,42 @@ h4 {
 /* query, for "system". Only colour values change — layout is shared.   */
 /* ------------------------------------------------------------------ */
 @utility theme-dark-tokens {
-  --background: #0f1216;
-  --foreground: #e6e9ee;
-  --surface: #161a20;
-  --surface-low: #1b2027;
-  --surface-container: #232932;
+  --background: #050505;
+  --foreground: #ededed;
+  --surface: #0e0e0e;
+  --surface-low: #141414;
+  --surface-container: #1c1c1c;
   --brand: #4a66dd;
   --brand-container: #3a54c8;
   --brand-tint: #7a93f0;
-  --brand-soft: #1c2650;
+  --brand-soft: #151b34;
   --brand-foreground: #ffffff;
-  --border: #2a303a;
-  --border-strong: #3c4452;
-  --muted: #aab1bf;
+  --border: #262626;
+  --border-strong: #3a3a3a;
+  --muted: #a3a3a3;
 
-  --color-gray-50: #171b21;
-  --color-gray-100: #1e232b;
-  --color-gray-200: #2a303a;
-  --color-gray-300: #3c4452;
-  --color-gray-400: #6c7584;
-  --color-gray-500: #8a93a3;
-  --color-gray-600: #a9b1bf;
-  --color-gray-700: #c3c9d4;
-  --color-gray-800: #dadee5;
-  --color-gray-900: #eceff3;
-  --color-gray-950: #f6f7f9;
-  --color-slate-50: #171b21;
-  --color-slate-100: #1e232b;
-  --color-slate-200: #2a303a;
-  --color-slate-300: #3c4452;
-  --color-slate-400: #6c7584;
-  --color-slate-500: #8a93a3;
-  --color-slate-600: #a9b1bf;
-  --color-slate-700: #c3c9d4;
-  --color-slate-800: #dadee5;
-  --color-slate-900: #eceff3;
-  --color-slate-950: #f6f7f9;
+  --color-gray-50: #121212;
+  --color-gray-100: #1a1a1a;
+  --color-gray-200: #262626;
+  --color-gray-300: #3a3a3a;
+  --color-gray-400: #6b6b6b;
+  --color-gray-500: #8c8c8c;
+  --color-gray-600: #ababab;
+  --color-gray-700: #c4c4c4;
+  --color-gray-800: #dcdcdc;
+  --color-gray-900: #eeeeee;
+  --color-gray-950: #f7f7f7;
+  --color-slate-50: #121212;
+  --color-slate-100: #1a1a1a;
+  --color-slate-200: #262626;
+  --color-slate-300: #3a3a3a;
+  --color-slate-400: #6b6b6b;
+  --color-slate-500: #8c8c8c;
+  --color-slate-600: #ababab;
+  --color-slate-700: #c4c4c4;
+  --color-slate-800: #dcdcdc;
+  --color-slate-900: #eeeeee;
+  --color-slate-950: #f7f7f7;
 
   --color-red-50: #2b1517;
   --color-red-100: #3a1b1e;
@@ -294,8 +294,8 @@ h4 {
   --color-blue-200: #1f4670;
   --color-blue-800: #a8cdf5;
 
-  --color-indigo-50: #171e3d;
-  --color-indigo-100: #1c2650;
+  --color-indigo-50: #141a30;
+  --color-indigo-100: #182042;
   --color-indigo-200: #2b3a7c;
   --color-indigo-300: #4a62c9;
   --color-indigo-400: #7b93ee;
@@ -382,25 +382,6 @@ h4 {
     to {
       opacity: 1;
       transform: none;
-    }
-  }
-  --animate-cube-spin: cube-spin 18s linear infinite;
-  @keyframes cube-spin {
-    from {
-      transform: rotateX(-24deg) rotateY(0deg);
-    }
-    to {
-      transform: rotateX(-24deg) rotateY(360deg);
-    }
-  }
-  --animate-float-slow: float-slow 6s ease-in-out infinite;
-  @keyframes float-slow {
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-    50% {
-      transform: translateY(-8px);
     }
   }
   --animate-route-progress: route-progress 1.4s cubic-bezier(0.1, 0.6, 0.2, 1) forwards;

@@ -67,13 +67,13 @@ export function OrdersClient() {
         subtitle="Each order has a buyer tracking link (no login) on its page."
         action={<Button onClick={() => setDrawerOpen(true)}>New order</Button>}
       />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           aria-label="Search orders"
           placeholder="Search order no., buyer, fabric or status"
           value={q}
           onChange={(e) => setQAndResetPage(e.target.value)}
-          className="sm:flex-1"
+          className="sm:w-72"
         />
         <Select
           aria-label="Filter by status"
