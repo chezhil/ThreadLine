@@ -3,8 +3,9 @@ import { requireRole } from "@/lib/auth";
 import { computeCosting, ordersInProgressIn, ordersRealisedIn, rollCostsForOrder } from "@/lib/accounts/costing";
 import { fieldErrorResponse, forbidden, notFound, zodFieldErrors } from "@/lib/accounts/http";
 import { monthQuerySchema } from "@/lib/validation/accounts";
+import { parsePageParams } from "@/lib/pagination";
 
-// GET                      → every order's cost, revenue and profit
+// GET                      → every order's cost, revenue and profit (optionally ?page=&pageSize=)
 // GET ?month=YYYY-MM       → orders booked that month (finished shipping) + work in progress active that month
 // GET ?orderId=…           → one order, with cost per roll
 export async function GET(req: NextRequest) {
@@ -15,6 +16,10 @@ export async function GET(req: NextRequest) {
   const monthParsed = monthQuerySchema.safeParse(sp.get("month") ?? undefined);
   if (!monthParsed.success) return fieldErrorResponse(zodFieldErrors(monthParsed.error));
 
+  // The costing engine has to look at every order regardless (month pools
+  // are spread across all of a month's activity), so pagination here only
+  // trims the response payload and what the "All orders" view renders — not
+  // the underlying computation.
   const { orders, pools } = await computeCosting();
 
   const orderId = sp.get("orderId");
@@ -25,7 +30,16 @@ export async function GET(req: NextRequest) {
   }
 
   const month = monthParsed.data;
-  if (!month) return NextResponse.json({ orders, pools });
+  if (!month) {
+    const { paginated, page, pageSize, skip, take } = parsePageParams(sp);
+    return NextResponse.json({
+      orders: paginated ? orders.slice(skip, skip + take) : orders,
+      total: orders.length,
+      page,
+      pageSize,
+      pools,
+    });
+  }
   return NextResponse.json({
     month,
     realised: ordersRealisedIn(orders, month),

@@ -13,6 +13,7 @@ import { recomputePaymentStatus } from "@/lib/order-status";
 import { emit, RealtimeEvents } from "@/lib/realtime";
 import { postLedgerEntry } from "@/lib/ledger";
 import { notReversed, reversalSummary } from "@/lib/reversals";
+import { parsePageParams } from "@/lib/pagination";
 
 const money = (n: number) => inr(n, { decimals: true });
 
@@ -64,6 +65,20 @@ export async function GET(req: NextRequest) {
     invoicesWithBalance(),
   ]);
   const counted = payments.filter((p) => !p.reversal);
+  // Totals must come from every invoice, not just the page/filter being
+  // shown — computed before the "show" filter and pagination below trim
+  // what's actually sent to the page's table.
+  const outstanding = round2(invoices.reduce((s, i) => s + Math.max(0, i.outstanding), 0));
+
+  const sp = req.nextUrl.searchParams;
+  const show = sp.get("show"); // "open" | "paid" | "all"/omitted
+  const q = sp.get("q")?.trim().toLowerCase();
+  const filtered = invoices.filter(
+    (i) =>
+      (show === "open" ? i.outstanding > 0.005 : show === "paid" ? i.outstanding <= 0.005 : true) &&
+      (!q || [i.invoiceNo, i.orderNo, i.buyerName].some((s) => s.toLowerCase().includes(q))),
+  );
+  const { paginated, page, pageSize, skip, take } = parsePageParams(sp);
 
   return NextResponse.json({
     month,
@@ -78,11 +93,14 @@ export async function GET(req: NextRequest) {
       receivedAt: p.receivedAt,
       reversal: p.reversal ? { reason: p.reversal.reason, createdAt: p.reversal.createdAt, replacementId: p.reversal.replacementId } : null,
     })),
-    invoices,
+    invoices: paginated ? filtered.slice(skip, skip + take) : filtered,
+    invoicesTotal: filtered.length,
+    page,
+    pageSize,
     totals: {
       receivedThisMonth: round2(counted.reduce((s, p) => s + p.amount, 0)),
       paymentsCount: counted.length,
-      outstanding: round2(invoices.reduce((s, i) => s + Math.max(0, i.outstanding), 0)),
+      outstanding,
     },
   });
 }

@@ -1,6 +1,6 @@
 "use client";
-import { useMemo, useState } from "react";
-import { Button, Card, CardHeader, Drawer, EmptyState, Input, Select, Table, Textarea } from "@/components/ui";
+import { useState } from "react";
+import { Button, Card, CardHeader, Drawer, EmptyState, Input, Pager, Select, Table, Textarea } from "@/components/ui";
 import { firstError, postJson, useApi } from "@/lib/useApi";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents, type DataChange } from "@/lib/realtime";
@@ -47,34 +47,36 @@ interface PaymentRow {
 }
 
 const MODE_LABEL: Record<string, string> = { cash: "Cash", upi: "UPI", neft: "NEFT", rtgs: "RTGS", cheque: "Cheque" };
+const INVOICES_PAGE_SIZE = 50;
 
 export function PaymentsClient() {
   const thisMonth = currentMonthKey();
   const [month, setMonth] = useState(thisMonth);
   const [q, setQ] = useState("");
   const [show, setShow] = useState("open");
+  const [page, setPage] = useState(1);
   const [payFor, setPayFor] = useState<InvoiceRow | null>(null);
   const [reverseFor, setReverseFor] = useState<PaymentRow | null>(null);
   const [cancelFor, setCancelFor] = useState<InvoiceRow | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+
+  const params = new URLSearchParams({ month, show, page: String(page), pageSize: String(INVOICES_PAGE_SIZE) });
+  if (q.trim()) params.set("q", q.trim());
   const { data, loading, error, refetch } = useApi<{
     payments: PaymentRow[];
     invoices: InvoiceRow[];
+    invoicesTotal: number;
     totals: { receivedThisMonth: number; outstanding: number };
-  }>(`/api/payments?month=${month}`);
+  }>(`/api/payments?${params.toString()}`);
 
   useRealtimeEvent<DataChange>(RealtimeEvents.DataChanged, (change) => {
     if (change.entity === "Payment" || change.entity === "Invoice") refetch();
   });
 
-  const invoices = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return (data?.invoices ?? []).filter(
-      (i) =>
-        (show === "all" || (show === "open" ? i.outstanding > 0.005 : i.outstanding <= 0.005)) &&
-        (!needle || [i.invoiceNo, i.orderNo, i.buyerName].some((s) => s.toLowerCase().includes(needle))),
-    );
-  }, [data, q, show]);
+  // Filtering/pagination now happen server-side (GET /api/payments?show=&q=&page=).
+  const invoices = data?.invoices ?? [];
+  const setQAndResetPage = (next: string) => { setQ(next); setPage(1); };
+  const setShowAndResetPage = (next: string) => { setShow(next); setPage(1); };
 
   return (
     <div className="flex flex-col gap-4">
@@ -93,17 +95,17 @@ export function PaymentsClient() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
             <Stat label="Outstanding (all invoices)" value={inr(data.totals.outstanding)} tone={data.totals.outstanding > 0 ? "bad" : "default"} />
             <Stat label={`Received in ${month}`} value={inr(data.totals.receivedThisMonth)} hint={`${data.payments.length} payment(s)`} />
-            <Stat label="Invoices" value={String(data.invoices.length)} hint={`${data.invoices.filter((i) => i.outstanding > 0.005).length} open`} />
+            <Stat label="Invoices" value={String(data.invoicesTotal)} />
           </div>
 
           <Card>
             <CardHeader title="Invoices" />
             <div className="mb-3 grid gap-3 sm:grid-cols-[1fr_auto]">
-              <Input aria-label="Search invoices" placeholder="Search invoice, order or buyer" value={q} onChange={(e) => setQ(e.target.value)} />
+              <Input aria-label="Search invoices" placeholder="Search invoice, order or buyer" value={q} onChange={(e) => setQAndResetPage(e.target.value)} />
               <Select
                 aria-label="Show"
                 value={show}
-                onChange={(e) => setShow(e.target.value)}
+                onChange={(e) => setShowAndResetPage(e.target.value)}
                 options={[
                   { value: "open", label: "Outstanding" },
                   { value: "paid", label: "Fully paid" },
@@ -164,11 +166,12 @@ export function PaymentsClient() {
               keyFor={(i) => i.id}
               emptyState={
                 <EmptyState
-                  title={data.invoices.length ? "No invoices match" : "No invoices yet"}
-                  description={data.invoices.length ? "Try another filter." : "Invoices are raised from Orders/Dispatch; payments are recorded against them here."}
+                  title={data.invoicesTotal ? "No invoices match" : "No invoices yet"}
+                  description={data.invoicesTotal ? "Try another filter." : "Invoices are raised from Orders/Dispatch; payments are recorded against them here."}
                 />
               }
             />
+            <Pager page={page} pageSize={INVOICES_PAGE_SIZE} total={data.invoicesTotal} onPageChange={setPage} />
           </Card>
 
           <Card>

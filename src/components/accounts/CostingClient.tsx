@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Badge, Card, CardHeader, Drawer, EmptyState, Input, Select, Table } from "@/components/ui";
+import { Badge, Card, CardHeader, Drawer, EmptyState, Input, Pager, Select, Table } from "@/components/ui";
 import { useApi } from "@/lib/useApi";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
@@ -21,6 +21,7 @@ const COST_LINES: { key: keyof OrderCosting["costs"]; label: string; how: string
 ];
 
 type View = "month" | "all";
+const ALL_PAGE_SIZE = 50;
 
 export function CostingClient() {
   const thisMonth = currentMonthKey();
@@ -29,13 +30,18 @@ export function CostingClient() {
   const [q, setQ] = useState("");
   const [stage, setStage] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
-  const url = view === "month" ? `/api/analytics/cost-per-order?month=${month}` : "/api/analytics/cost-per-order";
+  const url =
+    view === "month"
+      ? `/api/analytics/cost-per-order?month=${month}`
+      : `/api/analytics/cost-per-order?page=${page}&pageSize=${ALL_PAGE_SIZE}`;
   const { data, loading, error, refetch } = useApi<{
     orders?: OrderCosting[];
     realised?: OrderCosting[];
     inProgress?: OrderCosting[];
     pool?: MonthPool | null;
+    total?: number;
   }>(url);
   useRealtimeEvent(RealtimeEvents.OrderStatus, () => refetch());
 
@@ -65,7 +71,7 @@ export function CostingClient() {
             <Select
               aria-label="View"
               value={view}
-              onChange={(e) => setView(e.target.value as View)}
+              onChange={(e) => { setView(e.target.value as View); setPage(1); }}
               options={[
                 { value: "month", label: "Orders of a month" },
                 { value: "all", label: "All orders" },
@@ -151,6 +157,7 @@ export function CostingClient() {
               />
             }
           />
+          {view === "all" && typeof data.total === "number" && <Pager page={page} pageSize={ALL_PAGE_SIZE} total={data.total} onPageChange={setPage} />}
           {view === "month" && data.pool && data.pool.unabsorbed > 0 && (
             <p className="text-sm text-amber-700">
               {inr(data.pool.unabsorbed)} of this month&apos;s power, overhead and indirect wages could not be spread onto any order because no production was logged this month.
