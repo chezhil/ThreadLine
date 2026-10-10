@@ -58,28 +58,37 @@ export async function syncDerivedAlerts(db: PrismaClient = defaultDb) {
   const conditions = await currentConditions(db);
   const live = new Set(conditions.map((c) => c.type));
 
-  const open = await db.notification.findMany({
-    where: {
-      OR: DERIVED_PREFIXES.map((p) => ({ type: { startsWith: p } })),
-      NOT: { type: { contains: ":cleared:" } },
-    },
-    select: { id: true, type: true },
-  });
-  const existing = new Set(open.map((n) => n.type));
+  // Concurrent callers (e.g. two tabs polling GET /api/alerts at once) must
+  // not both observe "no open alert yet" and both insert one — read the open
+  // set and create any missing ones inside the same transaction, so SQLite
+  // serialises the two calls instead of racing them (same pattern as the
+  // concurrency-safety pass: see ../concurrency.ts and HARDENING_ADDENDUM.md).
+  const created = await db.$transaction(async (tx) => {
+    const open = await tx.notification.findMany({
+      where: {
+        OR: DERIVED_PREFIXES.map((p) => ({ type: { startsWith: p } })),
+        NOT: { type: { contains: ":cleared:" } },
+      },
+      select: { id: true, type: true },
+    });
+    const existing = new Set(open.map((n) => n.type));
 
-  for (const n of open) {
-    if (!live.has(n.type)) {
-      await db.notification.update({
-        where: { id: n.id },
-        data: { read: true, type: `${n.type}:cleared:${Date.now()}` },
-      });
+    for (const n of open) {
+      if (!live.has(n.type)) {
+        await tx.notification.update({
+          where: { id: n.id },
+          data: { read: true, type: `${n.type}:cleared:${Date.now()}` },
+        });
+      }
     }
-  }
-  for (const c of conditions) {
-    if (existing.has(c.type)) continue;
-    const created = await db.notification.create({ data: c });
-    emit(RealtimeEvents.NotificationNew, created);
-  }
+    const newlyCreated = [];
+    for (const c of conditions) {
+      if (existing.has(c.type)) continue;
+      newlyCreated.push(await tx.notification.create({ data: c }));
+    }
+    return newlyCreated;
+  });
+  for (const n of created) emit(RealtimeEvents.NotificationNew, n);
 }
 
 /** Raise a one-off notification and push it to every open screen. */

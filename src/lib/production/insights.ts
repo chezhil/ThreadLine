@@ -1,5 +1,7 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { emit } from "@/lib/realtime";
+
+type Db = PrismaClient | Prisma.TransactionClient;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SHIFTS_PER_DAY = 2;
@@ -109,36 +111,46 @@ export async function productionInsights(db: PrismaClient, now = new Date()) {
 
 // Called after production mutations. Alert identity is stable across recalculations;
 // an unread alert is updated instead of producing a duplicate on each log entry.
+// The whole read-check-write pass runs inside one transaction so two near-
+// simultaneous callers (e.g. two floor supervisors logging output at once)
+// can't both see "no open alert yet" and both insert one (same race the
+// derived-alerts sync in ../accounts/alerts.ts had — see its comment).
 export async function refreshProductionAlerts(db: PrismaClient) {
   const insights = await productionInsights(db);
   const active = new Set<string>();
-  for (const risk of insights.delayRisks) {
-    const type = `production_delay:${risk.orderId}`;
-    active.add(type);
-    const message = `${risk.orderNo} risks delay: ${risk.reason}. Deadline ${risk.deadline.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}.`;
-    await saveAlert(db, type, message, "warning");
-  }
-  for (const suggestion of insights.reorderSuggestions) {
-    const type = `production_reorder:${suggestion.yarnTypeId}`;
-    active.add(type);
-    const message = `Reorder ${suggestion.reorderKg} kg of ${suggestion.yarnName}; ${suggestion.stockKg} kg remains${suggestion.daysLeft === null ? "" : ` (${suggestion.daysLeft} days at current usage)`}.`;
-    await saveAlert(db, type, message, "warning");
-  }
-  const open = await db.notification.findMany({
-    where: { read: false, OR: [{ type: { startsWith: "production_delay:" } }, { type: { startsWith: "production_reorder:" } }] },
-    select: { id: true, type: true },
+  const notifications = await db.$transaction(async (tx) => {
+    const created: Array<{ id: string }> = [];
+    for (const risk of insights.delayRisks) {
+      const type = `production_delay:${risk.orderId}`;
+      active.add(type);
+      const message = `${risk.orderNo} risks delay: ${risk.reason}. Deadline ${risk.deadline.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}.`;
+      const n = await saveAlert(tx, type, message, "warning");
+      if (n) created.push(n);
+    }
+    for (const suggestion of insights.reorderSuggestions) {
+      const type = `production_reorder:${suggestion.yarnTypeId}`;
+      active.add(type);
+      const message = `Reorder ${suggestion.reorderKg} kg of ${suggestion.yarnName}; ${suggestion.stockKg} kg remains${suggestion.daysLeft === null ? "" : ` (${suggestion.daysLeft} days at current usage)`}.`;
+      const n = await saveAlert(tx, type, message, "warning");
+      if (n) created.push(n);
+    }
+    const open = await tx.notification.findMany({
+      where: { read: false, OR: [{ type: { startsWith: "production_delay:" } }, { type: { startsWith: "production_reorder:" } }] },
+      select: { id: true, type: true },
+    });
+    for (const alert of open) {
+      if (!active.has(alert.type)) await tx.notification.update({ where: { id: alert.id }, data: { read: true } });
+    }
+    return created;
   });
-  for (const alert of open) {
-    if (!active.has(alert.type)) await db.notification.update({ where: { id: alert.id }, data: { read: true } });
-  }
+  for (const n of notifications) await emit("notification:new", n);
   return insights;
 }
 
-async function saveAlert(db: PrismaClient, type: string, message: string, severity: string) {
+async function saveAlert(db: Db, type: string, message: string, severity: string) {
   const existing = await db.notification.findFirst({ where: { type, read: false } });
-  if (existing?.message === message) return;
-  const notification = existing
+  if (existing?.message === message) return null;
+  return existing
     ? await db.notification.update({ where: { id: existing.id }, data: { message, severity } })
     : await db.notification.create({ data: { type, message, severity } });
-  await emit("notification:new", notification);
 }

@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       let orderToQc = false;
       if (completed && workOrder.order.status === "IN_PRODUCTION") {
         const stages = await tx.workOrder.findMany({ where: { orderId: workOrder.orderId }, select: { stage: true, status: true } });
-        const allDone = ["spinning", "weaving", "dyeing"].every((stage) => stages.some((row) => row.stage === stage && row.status === "COMPLETED"));
+        const allDone = stages.length > 0 && stages.every((row) => row.status === "COMPLETED");
         if (allDone) {
           await applyProductionCompleted(tx, workOrder.orderId);
           orderToQc = true;

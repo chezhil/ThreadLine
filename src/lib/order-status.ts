@@ -89,7 +89,7 @@ export async function recomputeProductionStatus(tx: Db, orderId: string) {
   let productionStatus: ProductionStatus;
   if (workOrders.length === 0) {
     productionStatus = "NOT_STARTED";
-  } else if (["spinning", "weaving", "dyeing"].every((s) => workOrders.some((w) => w.stage === s && w.status === "COMPLETED"))) {
+  } else if (workOrders.every((w) => w.status === "COMPLETED")) {
     productionStatus = "DONE";
   } else {
     productionStatus = "IN_PRODUCTION";
