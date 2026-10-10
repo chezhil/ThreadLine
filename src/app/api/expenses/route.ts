@@ -6,6 +6,7 @@ import { EXPENSE_CATEGORIES, expenseSchema, monthQuerySchema } from "@/lib/valid
 import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from "@/lib/accounts/http";
 import { currentMonthKey, istMidnight, monthRange } from "@/lib/accounts/period";
 import { expenseCategoryToLedgerType, postLedgerEntry } from "@/lib/ledger";
+import { writeTransaction } from "@/lib/concurrency";
 
 // GET ?month=YYYY-MM[&category=power][&orderId=…]
 export async function GET(req: NextRequest) {
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
   }
 
   const date = istMidnight(parsed.data.date);
-  const expense = await db.$transaction(async (tx) => {
+  const expense = await writeTransaction(async (tx) => {
     const created = await tx.expense.create({ data: { ...parsed.data, date } });
     await postLedgerEntry(tx, {
       date,

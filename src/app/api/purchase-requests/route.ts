@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/accounts/alerts";
 import { purchaseRequestSchema } from "@/lib/validation/approvals";
 import { fieldErrorResponse, forbidden, readJson, zodFieldErrors } from "@/lib/accounts/http";
 
@@ -29,9 +31,23 @@ export async function POST(req: NextRequest) {
   const yarnType = await db.yarnType.findUnique({ where: { id: parsed.data.yarnTypeId } });
   if (!yarnType) return fieldErrorResponse({ yarnTypeId: ["Yarn type not found"] });
 
-  const request = await db.purchaseRequest.create({
-    data: { ...parsed.data, requestedBy: user.id },
+  // One open request per yarn type: a second click (or a second storekeeper)
+  // would otherwise queue the same purchase twice. Checked and created under
+  // the write lock so two at once can't both pass the check.
+  const request = await writeTransaction(async (tx) => {
+    const open = await tx.purchaseRequest.findFirst({ where: { yarnTypeId: yarnType.id, status: "PENDING" } });
+    if (open) return null;
+    return tx.purchaseRequest.create({ data: { ...parsed.data, requestedBy: user.id } });
   });
+  if (!request) {
+    return fieldErrorResponse({ yarnTypeId: [`A purchase request for ${yarnType.name} (${yarnType.colour}) is already waiting for approval`] }, 409);
+  }
+
   await logAudit("PurchaseRequest", request.id, "create", null, request, user.id);
+  await notify(
+    "approval_requested",
+    `Purchase request: ${request.qtyKg} kg of ${yarnType.name} (${yarnType.colour}) raised by ${user.name}. Review it in Approvals.`,
+    "info",
+  );
   return NextResponse.json({ request }, { status: 201 });
 }

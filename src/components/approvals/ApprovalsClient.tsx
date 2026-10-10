@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Badge, Button, Card, CardHeader, EmptyState, Table } from "@/components/ui";
 import { useApi, postJson } from "@/lib/useApi";
-import { inr } from "@/lib/accounts/format";
+import { dateIN, inr } from "@/lib/accounts/format";
 import { currentMonthKey, monthLabel } from "@/lib/accounts/period";
 import { MonthPicker } from "@/components/accounts/MonthPicker";
 import { ErrorNote, Loading } from "@/components/accounts/Stat";
@@ -18,6 +18,7 @@ interface PurchaseRequestRow {
   status: string;
   note: string | null;
   createdAt: string;
+  approvedAt: string | null;
   yarnType: { name: string; colour: string };
 }
 interface MaintenanceRequestRow {
@@ -26,6 +27,7 @@ interface MaintenanceRequestRow {
   status: string;
   cost: number | null;
   createdAt: string;
+  approvedAt: string | null;
   machine: { name: string; type: string; status: string };
 }
 interface PayoutApprovalRow {
@@ -34,6 +36,7 @@ interface PayoutApprovalRow {
   totalWages: number;
   status: string;
   createdAt: string;
+  approvedAt: string | null;
 }
 
 type Tab = "purchase" | "maintenance" | "payouts";
@@ -44,10 +47,13 @@ export function ApprovalsClient() {
   const maintenance = useApi<{ requests: MaintenanceRequestRow[]; canApprove: boolean }>("/api/maintenance-requests");
   const payouts = useApi<{ requests: PayoutApprovalRow[]; canApprove: boolean }>("/api/payout-approvals");
 
-  const pendingCount =
-    (purchase.data?.requests.filter((r) => r.status === "PENDING").length ?? 0) +
-    (maintenance.data?.requests.filter((r) => r.status === "PENDING").length ?? 0) +
-    (payouts.data?.requests.filter((r) => r.status === "PENDING").length ?? 0);
+  const pending = (rows?: { status: string }[]) => rows?.filter((r) => r.status === "PENDING").length ?? 0;
+  const pendingBy: Record<Tab, number> = {
+    purchase: pending(purchase.data?.requests),
+    maintenance: pending(maintenance.data?.requests),
+    payouts: pending(payouts.data?.requests),
+  };
+  const pendingCount = pendingBy.purchase + pendingBy.maintenance + pendingBy.payouts;
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "purchase", label: "Purchase requests" },
@@ -64,14 +70,20 @@ export function ApprovalsClient() {
         </p>
       </div>
 
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex gap-1 overflow-x-auto border-b border-border" role="tablist">
         {tabs.map((t) => (
           <button
             key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium ${tab === t.id ? "border-b-2 border-brand text-brand" : "text-gray-500"}`}
+            className={`whitespace-nowrap px-3 py-2 text-sm font-medium ${tab === t.id ? "border-b-2 border-brand text-brand" : "text-gray-500"}`}
           >
             {t.label}
+            {pendingBy[t.id] > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800">{pendingBy[t.id]}</span>
+            )}
           </button>
         ))}
       </div>
@@ -83,8 +95,69 @@ export function ApprovalsClient() {
   );
 }
 
-async function act(path: string, status: "APPROVED" | "REJECTED", extra?: Record<string, unknown>) {
-  return postJson(path, { status, ...extra }, "PATCH");
+function messageOf(result: { fieldErrors?: Record<string, string[]>; error?: string }, fallback: string) {
+  return Object.values(result.fieldErrors ?? {}).flat().join(" ") || result.error || fallback;
+}
+
+const decidedOn = (r: { status: string; approvedAt: string | null }) =>
+  r.status === "PENDING" || !r.approvedAt ? "—" : dateIN(r.approvedAt);
+
+/** Approve / Reject for one PENDING request. Disabled while a decision is in
+ * flight (so a double-click can't send two), shows the server's reason when
+ * it refuses (already decided elsewhere, total changed), and refreshes the
+ * list either way. */
+function Decision({
+  path,
+  onDone,
+  withCost = false,
+  confirmApprove,
+}: {
+  path: string;
+  onDone: () => void;
+  withCost?: boolean;
+  confirmApprove?: string;
+}) {
+  const [busy, setBusy] = useState<"APPROVED" | "REJECTED" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [cost, setCost] = useState("");
+
+  async function decide(status: "APPROVED" | "REJECTED") {
+    if (status === "APPROVED" && confirmApprove && !window.confirm(confirmApprove)) return;
+    setBusy(status);
+    setError(null);
+    const extra = withCost && status === "APPROVED" && cost.trim() !== "" ? { cost: Number(cost) } : {};
+    const result = await postJson(path, { status, ...extra }, "PATCH");
+    setBusy(null);
+    if (!result.ok) setError(messageOf(result, "Couldn't save the decision"));
+    onDone();
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1">
+        {withCost && (
+          <input
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+            placeholder="Est. cost ₹"
+            aria-label="Estimated repair cost in rupees (optional)"
+            className="w-28 rounded-md border border-border px-2 py-1 text-sm"
+          />
+        )}
+        <Button size="sm" disabled={busy !== null} onClick={() => decide("APPROVED")}>
+          {busy === "APPROVED" ? "Approving…" : "Approve"}
+        </Button>
+        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => decide("REJECTED")}>
+          {busy === "REJECTED" ? "Rejecting…" : "Reject"}
+        </Button>
+      </div>
+      {error && <p role="alert" className="max-w-xs text-xs text-red-700">{error}</p>}
+    </div>
+  );
 }
 
 function PurchaseRequestsTab({
@@ -104,13 +177,12 @@ function PurchaseRequestsTab({
           { header: "Yarn", render: (r: PurchaseRequestRow) => `${r.yarnType.name} (${r.yarnType.colour})` },
           { header: "Qty", className: "text-right tabular-nums", render: (r) => `${r.qtyKg} kg` },
           { header: "Note", render: (r) => r.note ?? "—" },
+          { header: "Raised", render: (r) => dateIN(r.createdAt) },
           { header: "Status", render: (r) => <Badge status={r.status} /> },
+          { header: "Decided", render: decidedOn },
           { header: "", render: (r) =>
               data.canApprove && r.status === "PENDING" ? (
-                <div className="flex gap-1">
-                  <Button size="sm" onClick={async () => { await act(`/api/purchase-requests/${r.id}`, "APPROVED"); refetch(); }}>Approve</Button>
-                  <Button size="sm" variant="secondary" onClick={async () => { await act(`/api/purchase-requests/${r.id}`, "REJECTED"); refetch(); }}>Reject</Button>
-                </div>
+                <Decision path={`/api/purchase-requests/${r.id}`} onDone={refetch} />
               ) : null,
           },
         ]}
@@ -139,13 +211,12 @@ function MaintenanceTab({
           { header: "Machine", render: (r: MaintenanceRequestRow) => `${r.machine.name} (${r.machine.type})` },
           { header: "Issue", render: (r) => r.description },
           { header: "Cost", className: "text-right tabular-nums", render: (r) => (r.cost != null ? inr(r.cost) : "—") },
+          { header: "Raised", render: (r) => dateIN(r.createdAt) },
           { header: "Status", render: (r) => <Badge status={r.status} /> },
+          { header: "Decided", render: decidedOn },
           { header: "", render: (r) =>
               data.canApprove && r.status === "PENDING" ? (
-                <div className="flex gap-1">
-                  <Button size="sm" onClick={async () => { await act(`/api/maintenance-requests/${r.id}`, "APPROVED"); refetch(); }}>Approve</Button>
-                  <Button size="sm" variant="secondary" onClick={async () => { await act(`/api/maintenance-requests/${r.id}`, "REJECTED"); refetch(); }}>Reject</Button>
-                </div>
+                <Decision path={`/api/maintenance-requests/${r.id}`} onDone={refetch} withCost />
               ) : null,
           },
         ]}
@@ -174,7 +245,7 @@ function PayoutsTab({
     const result = await postJson("/api/payout-approvals", { month });
     setRaising(false);
     if (!result.ok) {
-      setRaiseError(Object.values(result.fieldErrors ?? {}).flat().join(" ") || "Could not raise payout approval");
+      setRaiseError(messageOf(result, "Could not raise payout approval"));
       return;
     }
     refetch();
@@ -184,21 +255,22 @@ function PayoutsTab({
   if (error) return <ErrorNote message={`Couldn't load payout approvals: ${error}`} onRetry={refetch} />;
   if (!data) return null;
 
-  const alreadyRaised = data.requests.some((r) => r.month === month);
+  // A rejected month can be raised again (with its current wage total).
+  const alreadyRaised = data.requests.some((r) => r.month === month && r.status !== "REJECTED");
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader title="Flag a month's wages for payout" />
         <div className="flex flex-wrap items-center gap-3">
-          <MonthPicker month={month} onChange={setMonth} max={thisMonth} />
+          <MonthPicker month={month} onChange={(m) => { setMonth(m); setRaiseError(null); }} max={thisMonth} />
           <Button size="sm" onClick={raise} disabled={raising || alreadyRaised}>
             {alreadyRaised ? "Already raised" : raising ? "Raising…" : `Request approval for ${monthLabel(month)}`}
           </Button>
         </div>
         {raiseError && <p className="mt-2 text-sm text-red-700">{raiseError}</p>}
         <p className="mt-2 text-xs text-gray-500">
-          Approving creates an Expense (category &quot;wages&quot;) and its ledger entry for that month&apos;s accrued wage total — this is the one approval that is itself the real-world event.
+          Approving records the month&apos;s accrued wages as a &quot;wages&quot; expense dated the day you approve, with its ledger entry. If attendance changes before you approve, the total is refreshed and you approve the new figure.
         </p>
       </Card>
 
@@ -208,13 +280,16 @@ function PayoutsTab({
           columns={[
             { header: "Month", render: (r: PayoutApprovalRow) => monthLabel(r.month) },
             { header: "Wages", className: "text-right tabular-nums", render: (r) => inr(r.totalWages) },
+            { header: "Raised", render: (r) => dateIN(r.createdAt) },
             { header: "Status", render: (r) => <Badge status={r.status} /> },
+            { header: "Decided", render: decidedOn },
             { header: "", render: (r) =>
                 data.canApprove && r.status === "PENDING" ? (
-                  <div className="flex gap-1">
-                    <Button size="sm" onClick={async () => { await act(`/api/payout-approvals/${r.id}`, "APPROVED"); refetch(); }}>Approve</Button>
-                    <Button size="sm" variant="secondary" onClick={async () => { await act(`/api/payout-approvals/${r.id}`, "REJECTED"); refetch(); }}>Reject</Button>
-                  </div>
+                  <Decision
+                    path={`/api/payout-approvals/${r.id}`}
+                    onDone={refetch}
+                    confirmApprove={`Release ${inr(r.totalWages, { decimals: true })} of wages for ${monthLabel(r.month)}? This records a wages expense dated today.`}
+                  />
                 ) : null,
             },
           ]}

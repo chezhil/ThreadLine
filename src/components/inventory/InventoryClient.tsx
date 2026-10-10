@@ -8,6 +8,7 @@ import { RealtimeEvents } from "@/lib/realtime";
 interface PurchaseRequestRow {
   id: string;
   yarnTypeId: string;
+  qtyKg: number;
   status: string;
 }
 
@@ -55,12 +56,19 @@ export function InventoryClient() {
   const lowStock = useApi<{ lowStock: LowStockItem[] }>("/api/yarn/low-stock");
   const purchaseRequests = useApi<{ requests: PurchaseRequestRow[] }>("/api/purchase-requests");
   const [requesting, setRequesting] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<{ yarnTypeId: string; message: string } | null>(null);
 
   async function requestMore(item: LowStockItem) {
-    const suggestedKg = Math.max(1, Math.round((item.lowStockThresholdKg - item.remainingKg) * 2));
+    // Enough to get back to twice the threshold.
+    const suggestedKg = Math.max(1, Math.round(item.lowStockThresholdKg * 2 - item.remainingKg));
     setRequesting(item.yarnTypeId);
-    await postJson("/api/purchase-requests", { yarnTypeId: item.yarnTypeId, qtyKg: suggestedKg });
+    setRequestError(null);
+    const result = await postJson("/api/purchase-requests", { yarnTypeId: item.yarnTypeId, qtyKg: suggestedKg });
     setRequesting(null);
+    if (!result.ok) {
+      const message = Object.values(result.fieldErrors ?? {}).flat().join(" ") || result.error || "Couldn't raise the request";
+      setRequestError({ yarnTypeId: item.yarnTypeId, message });
+    }
     purchaseRequests.refetch();
   }
 
@@ -98,11 +106,16 @@ export function InventoryClient() {
                     {item.lowStockThresholdKg}kg
                   </span>
                   {pending ? (
-                    <Badge status="pending" />
+                    <span className="flex items-center gap-1 text-xs">
+                      {pending.qtyKg} kg requested <Badge status="pending" />
+                    </span>
                   ) : (
                     <Button size="sm" variant="secondary" disabled={requesting === item.yarnTypeId} onClick={() => requestMore(item)}>
                       {requesting === item.yarnTypeId ? "Requesting…" : "Request more"}
                     </Button>
+                  )}
+                  {requestError?.yarnTypeId === item.yarnTypeId && (
+                    <p role="alert" className="w-full text-xs text-red-700">{requestError.message}</p>
                   )}
                 </li>
               );

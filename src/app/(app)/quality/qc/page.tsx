@@ -206,6 +206,12 @@ export default function QcQueuePage() {
         } else {
           setFormErrors({ form: resData.error || "Submission failed" });
         }
+        // Someone else inspected this roll meanwhile: show the current grade,
+        // so submitting again is a deliberate decision over theirs.
+        if (res.status === 409) {
+          if (resData.currentQcStatus) setSelectedRoll({ ...selectedRoll, qcStatus: resData.currentQcStatus });
+          fetchRolls();
+        }
         return;
       }
 

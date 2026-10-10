@@ -6,6 +6,7 @@ import { generateInvoiceNo } from "@/lib/order-numbers";
 import { computeInvoiceTotals } from "@/lib/billing";
 import { logAudit } from "@/lib/audit";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
+import { postLedgerEntry } from "@/lib/ledger";
 
 const createInvoiceSchema = z.object({
   orderId: z.string().min(1),
@@ -51,6 +52,16 @@ export async function POST(req: NextRequest) {
       const invoiceNo = await generateInvoiceNo(tx);
       const invoice = await tx.invoice.create({
         data: { invoiceNo, orderId: order.id, buyerId: order.buyerId, subtotal, gst, total, status: "ISSUED" },
+      });
+      // Revenue (ex-GST) posts to the ledger in the same transaction, as the
+      // dispatch-time invoice does.
+      await postLedgerEntry(tx, {
+        date: invoice.createdAt,
+        type: "revenue",
+        amount: invoice.subtotal,
+        sourceType: "Invoice",
+        sourceId: invoice.id,
+        orderId: order.id,
       });
       return { invoice, created: true };
     }),

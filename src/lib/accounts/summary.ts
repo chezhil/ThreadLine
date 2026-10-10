@@ -1,10 +1,28 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "../db";
 import { EXPENSE_CATEGORIES, WAGE_FACTOR, type AttendanceStatus } from "../validation/accounts";
 import { computeCosting, ordersInProgressIn, ordersRealisedIn, type CostingResult } from "./costing";
 import { monthLabel, monthRange } from "./period";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+type AttendanceWage = { status: string; dailyWage: number | null; worker: { dailyWage: number } };
+
+/** One attendance mark's wage: the rate snapshotted on the mark (falling back
+ * to the worker's current rate for marks made before snapshots existed). */
+const wageFor = (a: AttendanceWage) =>
+  (a.dailyWage ?? a.worker.dailyWage) * (WAGE_FACTOR[a.status as AttendanceStatus] ?? 0);
+
+/** Wages earned in a month from its attendance marks — the figure a month's
+ * payout approval releases. */
+export async function accruedWages(month: string, client: PrismaClient | Prisma.TransactionClient = defaultDb) {
+  const { start, end } = monthRange(month);
+  const marks = await client.attendance.findMany({
+    where: { date: { gte: start, lt: end } },
+    select: { status: true, dailyWage: true, worker: { select: { dailyWage: true } } },
+  });
+  return r2(marks.reduce((s, a) => s + wageFor(a), 0));
+}
 
 export interface MonthSummary {
   month: string;
@@ -79,7 +97,7 @@ export async function monthSummary(
   let halfDays = 0;
   let absentDays = 0;
   for (const a of attendance) {
-    accrued += (a.dailyWage ?? a.worker.dailyWage) * (WAGE_FACTOR[a.status as AttendanceStatus] ?? 0);
+    accrued += wageFor(a);
     if (a.status === "present") presentDays++;
     else if (a.status === "half_day") halfDays++;
     else absentDays++;

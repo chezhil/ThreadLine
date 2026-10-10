@@ -39,15 +39,16 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   if (actor.user.role !== "owner") return problem("Only an owner can remove a machine", 403);
   const before = await db.machine.findUnique({ where: { id: params.id } });
   if (!before) return problem("Machine not found", 404);
-  const [workOrders, productionLogs, rolls, attendance] = await Promise.all([
+  const [workOrders, productionLogs, rolls, attendance, maintenance] = await Promise.all([
     db.workOrder.count({ where: { machineId: before.id } }),
     db.productionLog.count({ where: { machineId: before.id } }),
     db.roll.count({ where: { machineId: before.id } }),
     // Attendance marks point at the machine an operator ran; deleting it
     // would silently move their wages from direct to indirect labour.
     db.attendance.count({ where: { machineId: before.id } }),
+    db.maintenanceRequest.count({ where: { machineId: before.id } }),
   ]);
-  if (workOrders || productionLogs || rolls || attendance) return problem("Machine has production history and cannot be removed", 409);
+  if (workOrders || productionLogs || rolls || attendance || maintenance) return problem("Machine has production history and cannot be removed", 409);
   await db.machine.delete({ where: { id: before.id } });
   await logAudit("Machine", before.id, "DELETE", before, null, actor.user.id);
   await emit("machine:status", { machineId: before.id, deleted: true });

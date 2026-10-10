@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { notify } from "@/lib/accounts/alerts";
 import { approvalActionSchema } from "@/lib/validation/approvals";
+import { alreadyDecided, approvalVerb } from "@/lib/approvals/http";
 import { fieldErrorResponse, forbidden, notFound, readJson, zodFieldErrors } from "@/lib/accounts/http";
 
 // PATCH { status, cost? } — owner only. Approving records the go-ahead (and
@@ -16,22 +19,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const parsed = approvalActionSchema.safeParse(await readJson(req));
   if (!parsed.success) return fieldErrorResponse(zodFieldErrors(parsed.error));
+  const { status, cost } = parsed.data;
 
-  const existing = await db.maintenanceRequest.findUnique({ where: { id } });
+  const existing = await db.maintenanceRequest.findUnique({ where: { id }, include: { machine: true } });
   if (!existing) return notFound("Maintenance request not found");
-  if (existing.status !== "PENDING") {
-    return fieldErrorResponse({ status: [`Already ${existing.status.toLowerCase()}`] });
+  if (existing.status !== "PENDING") return alreadyDecided(existing.status);
+
+  const updated = await writeTransaction(async (tx) => {
+    const claimed = await tx.maintenanceRequest.updateMany({
+      where: { id, status: "PENDING" },
+      data: {
+        status,
+        approvedBy: user.id,
+        approvedAt: new Date(),
+        // A cost estimate only means something on a repair that goes ahead.
+        ...(status === "APPROVED" && cost !== undefined ? { cost } : {}),
+      },
+    });
+    return claimed.count === 1 ? tx.maintenanceRequest.findUniqueOrThrow({ where: { id } }) : null;
+  });
+  if (!updated) {
+    const now = await db.maintenanceRequest.findUniqueOrThrow({ where: { id } });
+    return alreadyDecided(now.status);
   }
 
-  const updated = await db.maintenanceRequest.update({
-    where: { id },
-    data: {
-      status: parsed.data.status,
-      approvedBy: user.id,
-      approvedAt: new Date(),
-      cost: parsed.data.cost ?? existing.cost,
-    },
-  });
-  await logAudit("MaintenanceRequest", id, "status_change", { status: "PENDING" }, { status: updated.status }, user.id);
+  await logAudit(
+    "MaintenanceRequest",
+    id,
+    "status_change",
+    { status: "PENDING" },
+    { status: updated.status, cost: updated.cost },
+    user.id,
+  );
+  await notify("approval_decided", `Maintenance request for ${existing.machine.name} was ${approvalVerb(status)}.`, "info");
   return NextResponse.json({ request: updated });
 }

@@ -25,12 +25,16 @@ export async function GET(req: NextRequest) {
   const orders = costing.orders.filter((o) => o.activeMonths.includes(month));
 
   const csvEscape = (v: string | number | null): string => {
-    const s = v === null ? "" : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    let s = v === null ? "" : String(v);
+    // Text a spreadsheet would run as a formula (a buyer named "=HYPERLINK(…)")
+    // is neutralised with a leading quote; numbers are left as numbers.
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const row = (cells: (string | number | null)[]) => cells.map(csvEscape).join(",") + "\r\n";
 
-  let csv = "";
+  // BOM so Excel reads the file as UTF-8 (buyer names, the em dash below).
+  let csv = "\uFEFF";
   csv += row([`ThreadLine month-end report — ${summary.label}`]);
   csv += "\r\n";
 

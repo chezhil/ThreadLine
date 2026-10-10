@@ -14,7 +14,10 @@ export async function GET(req: NextRequest) {
   const orderId = sp.get("orderId");
   const sourceType = sp.get("sourceType");
   const sourceId = sp.get("sourceId");
-  const limit = Math.min(Math.max(Number(sp.get("limit") ?? "200"), 1), 1000);
+  const limit = Number(sp.get("limit") ?? "200");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+    return NextResponse.json({ error: "limit must be a whole number from 1 to 1000" }, { status: 400 });
+  }
 
   if (!orderId && !(sourceType && sourceId)) {
     return NextResponse.json({ error: "Pass orderId, or sourceType and sourceId" }, { status: 400 });
