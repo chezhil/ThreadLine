@@ -1,5 +1,12 @@
-import { ModulePlaceholder } from "@/components/layout/ModulePlaceholder";
+import { OwnerOnly } from "@/components/accounts/OwnerOnly";
+import { AssistantClient } from "@/components/assistant/AssistantClient";
+
+export const instant = false;
 
 export default function Page() {
-  return <ModulePlaceholder owner="Module 4 (Devacharan)" feature="Owner AI assistant" />;
+  return (
+    <OwnerOnly>
+      <AssistantClient />
+    </OwnerOnly>
+  );
 }
