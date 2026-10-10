@@ -388,17 +388,31 @@ Essentially all of it:
   bad row doesn't block the others; confirmed non-owner and unauthenticated
   requests get 403/401; confirmed every import shows up in the Audit Trail
   tagged "Import" so it's distinguishable from a manual entry.
-- Could not test the photo-scanning path against a real model: this
-  environment has Ollama installed but only a text model (`llama3.2:3b`), no
-  vision model. Verified the failure path instead — `ollamaVision` correctly
-  reports `Model "llava" is not installed in Ollama. Run: ollama pull llava`
-  rather than hanging or crashing, both from the lib function directly and
-  through the actual API route (503 with that message). **Before relying on
-  the scanner, pull a vision model** (`ollama pull llava`, or set
-  `OLLAMA_VISION_MODEL` to another multimodal model you have) **and test it
-  against a real photo of a register** — the JSON-extraction prompt in
-  `src/lib/import/ocr.ts` has never been validated against actual model
-  output, only against the "model missing" error path.
+- **Update after pulling `llava` and testing for real**: the model loads and
+  responds, but the full extraction prompt (field list + JSON-only
+  instructions) against a synthetic single-row test register was not
+  reliable: it took **159 seconds** on a warm model (Apple M5, so not a weak
+  machine) and the response was `done_reason: "length"` — it never finished;
+  instead of transcribing the one real row in the image, it hallucinated an
+  open-ended sequence of fake rows ("Cotton 30s", "40s", "50s", ... up to
+  "850s") that don't exist in the image, and kept going until it hit the
+  token limit. A bare "describe this image" prompt (no JSON structure asked
+  for) returned in 5.7s and got the real supplier/colour/yarn-count right
+  but garbled the lot number and quantity. So: the model is usable for
+  *something*, but the current structured-extraction prompt is not reliable
+  — this is a prompt/model problem, not a "just raise the timeout" problem,
+  though `OLLAMA_TIMEOUT_MS` (default 90s) is also too short for llava's
+  realistic latency and should go up regardless (e.g. 180000).
+  **Before relying on the scanner**: (1) raise `OLLAMA_TIMEOUT_MS`, (2) try
+  bounding the response with Ollama's `num_predict` option so a confused
+  model fails fast instead of rambling for two minutes, (3) consider testing
+  a different vision model (`llama3.2-vision`, `bakllava`, `moondream` for
+  speed) against real handwriting photos rather than assuming `llava` is the
+  right default, (4) consider asking for one row at a time instead of the
+  whole register in one call, which may reduce the hallucinate-extra-rows
+  failure mode. None of this is tuned yet — the prompt in
+  `src/lib/import/ocr.ts` is a first draft that has now been proven to need
+  work, not a validated one.
 
 ### Known gaps / honest status
 - The SQL parser handles typical dumps but not every SQL dialect quirk

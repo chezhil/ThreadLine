@@ -7,6 +7,11 @@ export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
 // read images. Reading a handwritten register needs a multimodal model.
 export const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? "llava";
 const TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 90_000);
+// Vision inference is much slower than text, even warm — measured ~160s for
+// one register photo on Apple M5 with llava. Separate from OLLAMA_TIMEOUT_MS
+// so raising this doesn't also make a hung/unreachable text assistant call
+// wait longer before reporting the problem.
+const VISION_TIMEOUT_MS = Number(process.env.OLLAMA_VISION_TIMEOUT_MS ?? 240_000);
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -20,10 +25,11 @@ export class OllamaUnavailableError extends Error {}
 async function ollamaRequest(
   model: string,
   messages: ChatMessage[],
-  opts: { json?: boolean } = {},
+  opts: { json?: boolean; timeoutMs?: number } = {},
 ): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -39,7 +45,7 @@ async function ollamaRequest(
       signal: controller.signal,
     });
   } catch (e) {
-    const reason = controller.signal.aborted ? `timed out after ${TIMEOUT_MS / 1000}s` : "is not reachable";
+    const reason = controller.signal.aborted ? `timed out after ${timeoutMs / 1000}s` : "is not reachable";
     throw new OllamaUnavailableError(`The local model at ${OLLAMA_URL} ${reason}${e instanceof Error && !controller.signal.aborted ? ` (${e.message})` : ""}.`);
   } finally {
     clearTimeout(timer);
@@ -63,5 +69,5 @@ export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean
 
 /** Like ollamaChat, but against the vision-capable model for image input. */
 export async function ollamaVision(messages: ChatMessage[], opts: { json?: boolean } = {}): Promise<string> {
-  return ollamaRequest(OLLAMA_VISION_MODEL, messages, opts);
+  return ollamaRequest(OLLAMA_VISION_MODEL, messages, { ...opts, timeoutMs: VISION_TIMEOUT_MS });
 }
