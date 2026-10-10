@@ -6,8 +6,8 @@ import { emit } from "@/lib/realtime";
 import { productionLogSchema } from "@/lib/validation/production";
 import { productionActor } from "@/lib/production/auth";
 import { fieldError, jsonBody, problem } from "@/lib/production/http";
-import { refreshProductionAlerts } from "@/lib/production/insights";
-import { applyProductionCompleted } from "@/lib/order-status";
+import { millDayRange, refreshProductionAlerts } from "@/lib/production/insights";
+import { applyProductionCompleted, FINAL_STAGE, recordStatusChanges, type StatusChange } from "@/lib/order-status";
 
 export async function POST(request: Request) {
   const actor = await productionActor();
@@ -20,7 +20,25 @@ export async function POST(request: Request) {
       const workOrder = await tx.workOrder.findUnique({ where: { id: input.workOrderId }, include: { machine: true, order: true } });
       if (!workOrder) throw new EntryError("workOrderId", "Work order not found");
       if (workOrder.status === "COMPLETED") throw new EntryError("workOrderId", "Work order is complete");
+      if (workOrder.order.productionStatus !== "IN_PRODUCTION" || workOrder.order.status === "CLOSED") {
+        throw new EntryError("workOrderId", "This order is not in production");
+      }
       if (workOrder.machine.status !== "RUNNING") throw new EntryError("workOrderId", "Set the machine to RUNNING before logging output");
+      // A machine can't make more than its rated output in one shift: bound
+      // what is logged against it for this shift today (IST mill day).
+      const { start, end } = millDayRange();
+      const shiftSoFar = await tx.productionLog.aggregate({
+        where: { machineId: workOrder.machineId, shift: input.shift, loggedAt: { gte: start, lt: end } },
+        _sum: { qtyProduced: true },
+      });
+      const alreadyLogged = shiftSoFar._sum.qtyProduced ?? 0;
+      if (alreadyLogged + input.qtyProduced > workOrder.machine.capacityMetresPerShift + 0.000001) {
+        throw new EntryError(
+          "qtyProduced",
+          `${workOrder.machine.name} makes at most ${workOrder.machine.capacityMetresPerShift} m per shift` +
+            (alreadyLogged ? `; ${alreadyLogged} m is already logged for ${input.shift} today` : ""),
+        );
+      }
       const nextQty = workOrder.producedQty + input.qtyProduced;
       if (nextQty > workOrder.plannedQty + 0.000001) throw new EntryError("qtyProduced", "Output exceeds planned metres");
       const completed = nextQty >= workOrder.plannedQty - 0.000001;
@@ -37,25 +55,29 @@ export async function POST(request: Request) {
       const log = await tx.productionLog.create({
         data: { workOrderId: workOrder.id, machineId: workOrder.machineId, shift: input.shift, qtyProduced: input.qtyProduced, loggedBy: actor.user.id },
       });
-      let orderToQc = false;
-      if (completed && workOrder.order.status === "IN_PRODUCTION") {
+      // Production is finished only when the last stage (dyeing) completes and
+      // nothing else is still open — completing spinning first must not push
+      // the order to QC (that used to block weaving from ever being created).
+      let statusChange: StatusChange | null = null;
+      if (completed && workOrder.stage === FINAL_STAGE) {
         const stages = await tx.workOrder.findMany({ where: { orderId: workOrder.orderId }, select: { stage: true, status: true } });
-        const allDone = stages.length > 0 && stages.every((row) => row.status === "COMPLETED");
-        if (allDone) {
-          await applyProductionCompleted(tx, workOrder.orderId);
-          orderToQc = true;
+        if (stages.every((row) => row.status === "COMPLETED")) {
+          statusChange = await applyProductionCompleted(tx, workOrder.orderId);
         }
       }
-      return { log, workOrder, nextQty, completed, orderToQc };
+      return { log, workOrder, nextQty, completed, statusChange };
     });
-    await logAudit("ProductionLog", result.log.id, "CREATE", null, result.log, actor.user.id);
-    await logAudit("WorkOrder", result.workOrder.id, "PROGRESS", String(result.workOrder.producedQty), String(result.nextQty), actor.user.id);
-    if (result.orderToQc) {
-      await logAudit("Order", result.workOrder.orderId, "STATUS_CHANGE", "IN_PRODUCTION", "QC", actor.user.id);
-      await emit("order:status", { orderId: result.workOrder.orderId, status: "QC" });
+    // The log is committed; a failure in audit/broadcast/alerts below must not
+    // turn it into a 500 the supervisor would retry (double-counting output).
+    try {
+      await logAudit("ProductionLog", result.log.id, "CREATE", null, result.log, actor.user.id);
+      await logAudit("WorkOrder", result.workOrder.id, "PROGRESS", String(result.workOrder.producedQty), String(result.nextQty), actor.user.id);
+      await recordStatusChanges([result.statusChange], actor.user.id);
+      await emit("machine:status", { machineId: result.workOrder.machineId, status: result.workOrder.machine.status, outputChanged: true });
+      await refreshProductionAlerts(db);
+    } catch (sideEffectError) {
+      console.error("Production log saved; follow-up step failed:", sideEffectError);
     }
-    await emit("machine:status", { machineId: result.workOrder.machineId, status: result.workOrder.machine.status, outputChanged: true });
-    await refreshProductionAlerts(db);
     return NextResponse.json({ ...result.log, producedQty: result.nextQty, completed: result.completed }, { status: 201 });
   } catch (error) {
     if (error instanceof EntryError) return problem(error.message, 400, error.field);

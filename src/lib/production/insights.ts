@@ -7,6 +7,8 @@ type Db = PrismaClient | Prisma.TransactionClient;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SHIFTS_PER_DAY = 2;
 const REORDER_HORIZON_DAYS = 7;
+const STAGES = ["spinning", "weaving", "dyeing"] as const;
+const MACHINE_TYPE: Record<(typeof STAGES)[number], string> = { spinning: "spinning", weaving: "loom", dyeing: "dyeing" };
 
 export type DelayRisk = {
   orderId: string;
@@ -36,9 +38,9 @@ export function millDayRange(now = new Date()) {
 }
 
 export async function productionInsights(db: PrismaClient, now = new Date()) {
-  const [orders, yarnTypes, logs] = await Promise.all([
+  const [orders, yarnTypes, logs, machines] = await Promise.all([
     db.order.findMany({
-      where: { status: "IN_PRODUCTION" },
+      where: { productionStatus: "IN_PRODUCTION", status: { not: "CLOSED" } },
       include: { workOrders: { include: { machine: true } } },
     }),
     db.yarnType.findMany({ include: { lots: true } }),
@@ -46,15 +48,32 @@ export async function productionInsights(db: PrismaClient, now = new Date()) {
       where: { loggedAt: { gte: new Date(now.getTime() - 7 * DAY_MS) }, workOrder: { stage: "weaving" } },
       include: { workOrder: { include: { order: { include: { reservations: { include: { yarnLot: true } } } } } } },
     }),
+    db.machine.findMany({ select: { type: true, status: true, capacityMetresPerShift: true } }),
   ]);
+  // Best available machine per type, for stages that have no work order yet.
+  const bestCapacity = new Map<string, number>();
+  for (const m of machines) {
+    if (m.status === "BREAKDOWN" || m.status === "MAINTENANCE") continue;
+    bestCapacity.set(m.type, Math.max(bestCapacity.get(m.type) ?? 0, m.capacityMetresPerShift));
+  }
 
   const delayRisks: DelayRisk[] = [];
   for (const order of orders) {
     const daysAvailable = Math.max(0, (order.deadline.getTime() - now.getTime()) / DAY_MS);
-    const stages = new Set(order.workOrders.map((workOrder) => workOrder.stage));
-    const missingStage = ["spinning", "weaving", "dyeing"].find((stage) => !stages.has(stage));
+    // A stage is "missing" only when the one before it is finished and nobody
+    // has created its work order — stages simply not reached yet are normal
+    // (and seeded orders that skip spinning are not at risk for that).
+    const byStage = new Map(order.workOrders.map((workOrder) => [workOrder.stage, workOrder]));
+    const missingStage = STAGES.find((stage, i) => i > 0 && !byStage.has(stage) && byStage.get(STAGES[i - 1])?.status === "COMPLETED");
     let estimatedDays = 0;
     let unavailable = false;
+    // Stages after the latest one that exists still have to run in full.
+    const lastIndex = Math.max(...STAGES.map((stage, i) => (byStage.has(stage) ? i : -1)));
+    for (const stage of STAGES.slice(lastIndex + 1)) {
+      const capacity = bestCapacity.get(MACHINE_TYPE[stage]);
+      if (!capacity) unavailable = true;
+      else estimatedDays += order.qtyMetres / (capacity * SHIFTS_PER_DAY);
+    }
     for (const workOrder of order.workOrders) {
       const remaining = Math.max(0, workOrder.plannedQty - workOrder.producedQty);
       if (!remaining) continue;
@@ -72,7 +91,7 @@ export async function productionInsights(db: PrismaClient, now = new Date()) {
         estimatedDays: missingStage || unavailable ? null : Math.ceil(estimatedDays * 10) / 10,
         daysAvailable: Math.ceil(daysAvailable * 10) / 10,
         reason: missingStage
-          ? `${missingStage} has no work order`
+          ? `${missingStage} is ready to start but has no work order`
           : unavailable
             ? "A scheduled machine is unavailable"
             : "Remaining work exceeds available shifts",

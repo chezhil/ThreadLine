@@ -8,6 +8,7 @@ import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from 
 import { notify } from "@/lib/accounts/alerts";
 import { currentMonthKey, istDateKey, monthRange } from "@/lib/accounts/period";
 import { recomputePaymentStatus } from "@/lib/order-status";
+import { emit, RealtimeEvents } from "@/lib/realtime";
 
 const formatINR = (n: number) =>
   n.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -108,14 +109,14 @@ export async function POST(req: NextRequest) {
 
   // Insert, then re-check the balance inside the same transaction so two
   // payments saved at once can't together overpay the invoice.
-  let payment;
+  let saved;
   try {
-    payment = await writeTransaction(async (tx) => {
+    saved = await writeTransaction(async (tx) => {
       const created = await tx.payment.create({ data: { invoiceId, amount, mode, receivedAt: at } });
       const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");
-      await recomputePaymentStatus(tx, invoice.orderId);
-      return created;
+      const paymentStatus = await recomputePaymentStatus(tx, invoice.orderId);
+      return { created, paymentStatus };
     });
   } catch (e) {
     if (e instanceof Error && e.message === "OVERPAID") {
@@ -123,7 +124,19 @@ export async function POST(req: NextRequest) {
     }
     throw e;
   }
+  const payment = saved.created;
   await logAudit("Payment", payment.id, "create", null, payment, user.id);
+  if (saved.paymentStatus.from !== saved.paymentStatus.to) {
+    await logAudit(
+      "Order",
+      invoice.orderId,
+      "payment_status_change",
+      { paymentStatus: saved.paymentStatus.from },
+      { paymentStatus: saved.paymentStatus.to },
+      user.id,
+    );
+    emit(RealtimeEvents.OrderStatus, { orderId: invoice.orderId, paymentStatus: saved.paymentStatus.to });
+  }
 
   const remaining = round2(outstanding - amount);
   await notify(

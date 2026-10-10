@@ -39,14 +39,14 @@ async function currentConditions(db: PrismaClient): Promise<Condition[]> {
       message: `${m.name} is down (BREAKDOWN). Work orders on it are stalled until it is repaired.`,
       severity: "critical" as const,
     })),
-    ...ready.map((o) => {
+    // READY with nothing left on the shelf (every passed roll already
+    // shipped, the rest in rework) is not something to dispatch.
+    ...ready.filter((o) => o.rolls.length > 0).map((o) => {
       const metres = o.rolls.reduce((s, r) => s + r.lengthMetres, 0);
       const rolls = o.rolls.length;
       return {
         type: `order_ready:${o.id}`,
-        message: `${o.orderNo} for ${o.buyer.name} is READY for dispatch${
-          rolls ? ` — ${rolls} passed roll${rolls === 1 ? "" : "s"}, ${Math.round(metres)} m of ${o.qtyMetres} m.` : "."
-        }`,
+        message: `${o.orderNo} for ${o.buyer.name} is READY for dispatch — ${rolls} passed roll${rolls === 1 ? "" : "s"}, ${Math.round(metres)} m of ${o.qtyMetres} m.`,
         severity: "info" as const,
       };
     }),
