@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { Badge, Button, Card, CardHeader, EmptyState, Table } from "@/components/ui";
 import { useApi, postJson } from "@/lib/useApi";
+import { useRealtimeEvent } from "@/lib/useRealtime";
+import { RealtimeEvents } from "@/lib/realtime";
 import { dateIN, inr } from "@/lib/accounts/format";
 import { currentMonthKey, monthLabel } from "@/lib/accounts/period";
 import { MonthPicker } from "@/components/accounts/MonthPicker";
@@ -46,6 +48,12 @@ export function ApprovalsClient() {
   const purchase = useApi<{ requests: PurchaseRequestRow[]; canApprove: boolean }>("/api/purchase-requests");
   const maintenance = useApi<{ requests: MaintenanceRequestRow[]; canApprove: boolean }>("/api/maintenance-requests");
   const payouts = useApi<{ requests: PayoutApprovalRow[]; canApprove: boolean }>("/api/payout-approvals");
+  // New requests and decisions raise a notification: refresh the queues live.
+  useRealtimeEvent(RealtimeEvents.NotificationNew, () => {
+    purchase.refetch();
+    maintenance.refetch();
+    payouts.refetch();
+  });
 
   const pending = (rows?: { status: string }[]) => rows?.filter((r) => r.status === "PENDING").length ?? 0;
   const pendingBy: Record<Tab, number> = {

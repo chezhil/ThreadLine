@@ -5,6 +5,7 @@
 //   BASE=http://localhost:3000 DATABASE_URL="file:./dev.db" npx tsx scripts/verify-hardening.ts
 //
 // Writes real rows; run it against a freshly seeded scratch database.
+/* eslint-disable @typescript-eslint/no-explicit-any -- the checks read loosely shaped JSON responses */
 import { PrismaClient } from "@prisma/client";
 
 const BASE = process.env.BASE ?? "http://localhost:3000";

@@ -27,13 +27,17 @@ export function DashboardClient() {
   );
   const output = useApi<MachineOutput>("/api/analytics/machine-output?days=7");
   const alerts = useApi<{ notifications: NotificationRow[]; unreadCount: number }>("/api/alerts?unread=1&limit=5");
+  const approvals = useApi<PendingApprovals>("/api/approvals/pending");
 
   useRealtimeEvent(RealtimeEvents.OrderStatus, () => {
     summary.refetch();
     costs.refetch();
   });
   useRealtimeEvent(RealtimeEvents.MachineStatus, () => output.refetch());
-  useRealtimeEvent(RealtimeEvents.NotificationNew, () => alerts.refetch());
+  useRealtimeEvent(RealtimeEvents.NotificationNew, () => {
+    alerts.refetch();
+    approvals.refetch();
+  });
 
   const s = summary.data;
   return (
@@ -43,6 +47,8 @@ export function DashboardClient() {
         subtitle="Any order, any roll, any rupee — from live mill data."
         action={<MonthPicker month={month} onChange={setMonth} max={thisMonth} />}
       />
+
+      {approvals.data && approvals.data.total > 0 && <ApprovalsWaiting data={approvals.data} />}
 
       {summary.error && <ErrorNote message={`Couldn't load the month summary: ${summary.error}`} onRetry={summary.refetch} />}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -74,6 +80,35 @@ export function DashboardClient() {
         <AlertsPanel data={alerts.data} loading={alerts.loading} error={alerts.error} />
       </div>
     </div>
+  );
+}
+
+interface PendingApprovals {
+  purchase: number;
+  maintenance: number;
+  payouts: number;
+  total: number;
+}
+
+function ApprovalsWaiting({ data }: { data: PendingApprovals }) {
+  const parts = [
+    data.purchase && `${data.purchase} yarn purchase${data.purchase === 1 ? "" : "s"}`,
+    data.maintenance && `${data.maintenance} maintenance`,
+    data.payouts && `${data.payouts} wage payout${data.payouts === 1 ? "" : "s"}`,
+  ].filter(Boolean);
+  return (
+    <Link
+      href="/approvals"
+      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
+    >
+      <span>
+        <span className="font-semibold">
+          {data.total} approval{data.total === 1 ? "" : "s"} waiting for you
+        </span>{" "}
+        · {parts.join(", ")}
+      </span>
+      <span className="font-medium">Review →</span>
+    </Link>
   );
 }
 

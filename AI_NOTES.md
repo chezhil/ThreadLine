@@ -671,3 +671,68 @@ own and are deliberately left alone here.
   containing "invalid" or exactly "simulate-failure" fails on purpose to
   exercise the retry path; everything else "succeeds" without calling any
   real provider. The UI says this explicitly.
+
+---
+
+## Hardening integration (Devacharan, Claude) — branch `integration/hardening`
+
+Merges Chezhil's hardening work on `main` (ledger, approvals, offline QC
+conflicts, alert outbox, month-end CSV) with the bug-fix pass above, then
+tests both together. Conflicts were resolved by keeping both behaviours:
+payments post a ledger entry *and* audit/broadcast the payment-status change;
+dispatches raise one invoice per order on the truck, each posting revenue to
+the ledger, keep the over-dispatch guard, and queue the buyer's "dispatched"
+alert inside the dispatch transaction; QC checks `baseQcStatus` and recomputes
+the order's roll aggregates. The local duplicate AlertDelivery migration was
+dropped because `main` already ships one.
+
+**Bugs found in review or testing, now fixed**
+
+- Approving was check-then-update: two clicks (or two owners) could both
+  approve, and a payout approved twice recorded the month's wages twice.
+  Decisions are now a conditional `PENDING → …` update under the write lock;
+  the loser gets 409.
+- Payout totals were frozen when raised. Approving now re-reads the month's
+  attendance; if it changed, the request is refreshed and the owner is asked
+  to approve the new figure. Future months and months with no wages are
+  refused, and a rejected month can be raised again (it was blocked forever
+  by the unique month).
+- Duplicate requests: one open purchase request per yarn type and one open
+  maintenance request per machine. The owner is notified of new requests and
+  everyone sees the decision in Alerts. A maintenance cost is kept only when
+  the repair is approved.
+- `POST /api/invoices` created invoices without a ledger entry, so the
+  ledger and payment status disagreed for invoice-before-dispatch orders.
+- Deleting a machine with a maintenance request was a 500 (foreign key); it
+  is now the usual 409 "has history".
+- `?limit=abc` on the ledger and outbox APIs was a 500; now 400.
+- The Alerts page asked every role for the owner-only outbox (a 403 and a
+  console error on every visit). The outbox card is rendered for the owner
+  only, and "Process now" shows failures.
+- Payment idempotency: a reused `clientMutationId` for a different invoice
+  returned the other payment; two simultaneous replays of one id hit the
+  primary key and returned 500. Both are handled (409 / the first payment).
+- Month-end CSV: UTF-8 BOM so Excel shows names correctly; text that would
+  run as a spreadsheet formula is neutralised.
+- Approvals UI ignored server errors and allowed double submits; it now
+  disables while saving, shows the reason for a refusal, has a repair cost
+  field, raised/decided dates and per-tab pending counts, and refreshes live.
+  Inventory's "Request more" shows errors and the quantity requested.
+- QC page: a 409 now shows the roll's current grade, so saving again is a
+  deliberate override rather than another conflict.
+- The owner had no way to reach Approvals on a phone; the dashboard now
+  shows "N approvals waiting for you" linking to it.
+
+**Tests**: `scripts/verify-hardening.ts` (new, 89 checks: ledger posting and
+idempotency, concurrent approvals, payout refresh, conflicts, dispatch alert,
+CSV, and database invariants — every invoice/payment/expense has exactly one
+matching ledger entry and every order's payment status matches the ledger),
+all earlier verify/test scripts, Chezhil's `test-offline-conflict` and
+`load-test`, and Playwright: every page for every role on desktop and phone,
+the end-to-end flows, offline replay, and the approvals/ledger/conflict UI.
+
+**Still open**: alerts are only sent when the owner clicks "Process now" or
+`npm run alerts:worker` runs (no real WhatsApp/SMS provider); costing still
+reads Payment/Expense rows rather than the ledger (they agree, the invariant
+check proves it); purchase approval doesn't create a yarn lot (by design —
+stock is added when the yarn arrives).
