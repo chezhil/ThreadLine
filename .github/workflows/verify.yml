@@ -32,12 +32,13 @@ jobs:
       - run: npx tsx scripts/verify-module3.ts
       - name: Start application
         run: |
-          npm run dev > /tmp/threadline-server.log 2>&1 &
+          npm run start > /tmp/threadline-server.log 2>&1 &
           for attempt in $(seq 1 60); do
             if curl --fail --silent "$BASE/manifest.json" > /dev/null; then exit 0; fi
             sleep 2
           done
           cat /tmp/threadline-server.log
           exit 1
+      - run: node scripts/verify-runtime.mjs
       - run: node scripts/verify-integration.mjs
       - run: node scripts/verify-accounts-api.mjs

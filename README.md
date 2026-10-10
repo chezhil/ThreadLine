@@ -40,6 +40,7 @@ Open http://localhost:3000. Seeded demo logins (see `scripts/seed.ts`):
   - `BASE=http://localhost:3000 node scripts/verify-accounts-api.mjs` — Module 4 API
   - `DATABASE_URL=file:./dev.db npx tsx scripts/verify-assistant.ts` — assistant guard rails (mock Ollama)
   - `npx tsx scripts/verify-module3.ts` — Module 3 seed sanity
+  - `BASE=http://localhost:3000 node scripts/verify-runtime.mjs` — signed-in page shells and Socket.IO (run against `npm run start` after building)
 - AI assistant: install [Ollama](https://ollama.com) and `ollama pull llama3.1:8b`;
   without it the assistant falls back to keyword routing.
 

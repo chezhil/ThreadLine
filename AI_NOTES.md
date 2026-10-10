@@ -337,7 +337,8 @@ UI kit); the other modules were adapted to it. No teammate's feature was removed
   Prisma externalization needs junction creation, which can be denied by Windows
   sandbox policies. Production build behavior is unchanged.
 - A PR verification workflow now runs migrations, seed, static checks, a
-  production build and every module's verification script on Linux. Local
+  production build, signed-in page and socket smoke checks, and every module's
+  verification script on Linux. Local
   production bundling was blocked by Windows sandbox file permissions.
 - `npm audit --omit=dev` reports no production dependency vulnerabilities.
   The full audit reports five high findings through the development-only
