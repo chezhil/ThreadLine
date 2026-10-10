@@ -334,6 +334,12 @@ model AlertDelivery {
   scheduledFor   DateTime  @default(now())
   sentAt         DateTime?
   createdAt      DateTime  @default(now())
+  // WhatsApp Cloud API: id returned when the message was accepted, and the
+  // furthest delivery receipt the webhook has reported for it.
+  providerMessageId String?  @unique
+  receipt           String? // DELIVERED | READ | FAILED
+  deliveredAt       DateTime?
+  readAt            DateTime?
 
   @@index([status, scheduledFor])
 }

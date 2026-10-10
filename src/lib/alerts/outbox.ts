@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { Prisma } from "@prisma/client";
+import { messageForAlert, sendWhatsAppText, whatsappConfigured } from "./whatsapp-cloud";
 
 const SEND_LEASE_MS = 5 * 60 * 1000;
 
@@ -59,9 +60,20 @@ export async function enqueueAlert(
   });
 }
 
+export interface DeliveryResult {
+  success: boolean;
+  error?: string;
+  /** Retrying can't help (bad number, rejected by the provider): fail now. */
+  permanent?: boolean;
+  /** Provider's id for the message, used to match webhook receipts. */
+  providerMessageId?: string;
+}
+
 /**
- * Delivery adapter interface. In development / local environment,
- * simulates delivery with high fidelity.
+ * Delivery adapter. WhatsApp alerts go out through the Cloud API when
+ * WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID are configured; every other
+ * channel (and WhatsApp with no credentials) is simulated so the queue, retry
+ * and backoff behaviour still run end to end in development.
  */
 export async function deliverAlert(alert: {
   id: string;
@@ -69,16 +81,23 @@ export async function deliverAlert(alert: {
   recipient: string;
   payload: string;
   templateName: string | null;
-}): Promise<{ success: boolean; error?: string }> {
-  // Simulate channel delivery or network failure simulation
+}): Promise<DeliveryResult> {
   try {
-    JSON.parse(alert.payload); // a payload that isn't valid JSON counts as a failed delivery
+    const payload = JSON.parse(alert.payload) as Record<string, unknown>; // not valid JSON counts as a failed delivery
+
+    if (alert.channel === "WHATSAPP" && whatsappConfigured()) {
+      const text = messageForAlert(alert.templateName, payload);
+      if (!text) return { success: false, permanent: true, error: `No WhatsApp message text for template "${alert.templateName ?? "(none)"}"` };
+      const sent = await sendWhatsAppText(alert.recipient, text);
+      return sent.ok
+        ? { success: true, providerMessageId: sent.messageId }
+        : { success: false, permanent: sent.permanent, error: sent.error };
+    }
+
     // Simulated failure test case if recipient is marked 'FAIL' or invalid
     if (alert.recipient.includes("invalid") || alert.recipient === "simulate-failure") {
       throw new Error(`Carrier rejected destination recipient: ${alert.recipient}`);
     }
-
-    // In dev / production simulator, log successful dispatch
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Unknown delivery failure" };
@@ -132,11 +151,12 @@ export async function processAlertOutbox(batchSize = 25): Promise<{
           attempts,
           sentAt: new Date(),
           lastError: null,
+          ...(result.providerMessageId ? { providerMessageId: result.providerMessageId } : {}),
         },
       });
       sent++;
     } else {
-      const isExhausted = attempts >= alert.maxAttempts;
+      const isExhausted = result.permanent || attempts >= alert.maxAttempts;
       // Exponential backoff: 2^attempts * 10 seconds
       const nextDelaySeconds = Math.pow(2, attempts) * 10;
       const nextScheduled = new Date(Date.now() + nextDelaySeconds * 1000);

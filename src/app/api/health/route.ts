@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { whatsappConfigured } from "@/lib/alerts/whatsapp-cloud";
 
 const startTime = Date.now();
 
@@ -37,6 +38,7 @@ export async function GET(_req: NextRequest) {
     status: "healthy",
     db: true,
     groq: groqConfigured,
+    whatsapp: whatsappConfigured(),
     uptime: Math.floor((Date.now() - startTime) / 1000),
   });
 }

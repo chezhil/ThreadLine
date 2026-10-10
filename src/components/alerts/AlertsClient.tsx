@@ -26,6 +26,7 @@ interface AlertDeliveryRow {
   lastError: string | null;
   createdAt: string;
   sentAt: string | null;
+  receipt: string | null;
 }
 
 export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
@@ -207,8 +208,8 @@ function OutboxCard() {
         {outbox.pendingCount > 0
           ? `${outbox.pendingCount} queued for delivery.`
           : "Nothing queued."}{" "}
-        Simulated send — no real WhatsApp/SMS/email provider is connected yet; this proves the
-        queue-and-retry shape, not a live channel.
+        WhatsApp alerts go out through the WhatsApp Cloud API when it is configured and show delivered/read receipts
+        below; otherwise (and for SMS/email) the send is simulated.
       </p>
       {outbox.deliveries.length === 0 ? (
         <p className="text-sm text-gray-500">No buyer alerts queued yet — these appear when an order becomes ready or is dispatched.</p>
@@ -218,6 +219,11 @@ function OutboxCard() {
             <div key={d.id} className="rounded-md border border-border px-2 py-1.5 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-2 py-0.5 font-medium ${statusBadgeClass(d.status)}`}>{d.status}</span>
+                {d.receipt && (
+                  <span className={`rounded-full border px-2 py-0.5 font-medium ${statusBadgeClass(d.receipt === "FAILED" ? "FAILED" : "SENT")}`}>
+                    {d.receipt === "READ" ? "Read" : d.receipt === "DELIVERED" ? "Delivered" : "Failed"}
+                  </span>
+                )}
                 <span className="font-medium text-foreground">{d.templateName ?? d.channel}</span>
                 <span className="text-gray-400">→ {d.recipient}</span>
                 <span className="ml-auto text-gray-400">{formatAlertTime(d.createdAt)}</span>

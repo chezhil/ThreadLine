@@ -60,6 +60,7 @@ jobs:
       - run: npx tsx scripts/verify-hardening.ts
       - run: npx tsx scripts/verify-order-status.ts
       - run: npx tsx scripts/verify-concurrency.ts
+      - run: npx tsx scripts/verify-whatsapp-cloud.ts
       - run: npx tsx scripts/verify-whatsapp-preview.ts
       - run: npx tsx scripts/verify-crud.ts
       - run: npx playwright test
