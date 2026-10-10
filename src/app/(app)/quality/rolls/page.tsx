@@ -24,8 +24,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+const PAGE_SIZE = 50;
+
 export default function RollsListPage() {
   const [rolls, setRolls] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [isMintOpen, setIsMintOpen] = useState(false);
@@ -55,13 +59,21 @@ export default function RollsListPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const fetchRolls = () => setReloadKey((k) => k + 1);
 
+  // Search resets back to page 1 — a stale page number past the end of a
+  // newly-narrowed result set would otherwise just show an empty table.
+  const setSearchAndResetPage = (next: string) => { setSearch(next); setPage(1); };
+
   useEffect(() => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (search.trim()) params.set("search", search.trim());
     const load = async () => {
+      setLoading(true);
       try {
-        const res = await fetch("/api/rolls");
+        const res = await fetch(`/api/rolls?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
-          setRolls(data);
+          setRolls(data.rolls);
+          setTotal(data.total);
         }
       } catch (err) {
         console.warn("Failed to fetch rolls:", err);
@@ -70,7 +82,7 @@ export default function RollsListPage() {
       }
     };
     load();
-  }, [reloadKey]);
+  }, [reloadKey, page, search]);
   useRealtimeEvent(RealtimeEvents.RollCreated, () => {
     fetchRolls();
   });
@@ -146,16 +158,9 @@ export default function RollsListPage() {
     }
   };
 
-  const filteredRolls = rolls.filter((r) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      r.rollNo.toLowerCase().includes(q) ||
-      r.order?.orderNo?.toLowerCase().includes(q) ||
-      r.machine?.name?.toLowerCase().includes(q) ||
-      r.qrToken?.toLowerCase().includes(q)
-    );
-  });
+  // Search/pagination now happen server-side (GET /api/rolls?search=&page=),
+  // so `rolls` is already exactly this page's matching rows.
+  const filteredRolls = rolls;
 
   return (
     <div className="space-y-6">
@@ -187,7 +192,7 @@ export default function RollsListPage() {
             type="text"
             placeholder="Search by roll number, QR token, order number, or machine..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setSearchAndResetPage(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
@@ -293,6 +298,30 @@ export default function RollsListPage() {
           </Table>
         )}
       </Card>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between gap-3 px-1 text-xs text-slate-500">
+          <span>
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(total, page * PAGE_SIZE)} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <span className="tabular-nums">
+              Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= Math.ceil(total / PAGE_SIZE)}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Mint Roll Drawer */}
       <Drawer

@@ -18,6 +18,7 @@ export function WorkOrdersClient() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
   const refresh = useCallback(() => {
     readApi<WorkOrderResponse>("/api/work-orders").then(setData).catch((failure) => setError(failure.message));
   }, []);
@@ -56,6 +57,12 @@ export function WorkOrdersClient() {
   const visibleWorkOrders = data?.workOrders.filter((workOrder) =>
     (`${workOrder.order.orderNo} ${workOrder.machine.name}`).toLowerCase().includes(query.toLowerCase()) && (!statusFilter || workOrder.status === statusFilter)
   ) ?? [];
+  // Rendered as cards (not a plain table), so only the current page's cards
+  // ever hit the DOM — the full list above still backs the dropdowns, which
+  // need every open work order regardless of what's currently in view.
+  const PAGE_SIZE = 30;
+  const pageCount = Math.max(1, Math.ceil(visibleWorkOrders.length / PAGE_SIZE));
+  const pagedWorkOrders = visibleWorkOrders.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   return <div className="production-page">
     <h1>Work orders & production</h1>
     <p className="production-muted">Assign each stage to a machine, then record shift output in metres. A mistyped entry can be corrected under each work order.</p>
@@ -91,13 +98,23 @@ export function WorkOrdersClient() {
     <section className="production-panel">
       <h2>Production progress</h2>
       <div className="production-actions">
-        <label>Search <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order or machine" /></label>
-        <label>Filter status <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="PLANNED">Planned</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option></select></label>
+        <label>Search <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Order or machine" /></label>
+        <label>Filter status <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">All statuses</option><option value="PLANNED">Planned</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option></select></label>
       </div>
       {!data && !error && <p>Loading work orders…</p>}
       {data?.workOrders.length === 0 && <p>No work orders yet.</p>}
       {data && data.workOrders.length > 0 && visibleWorkOrders.length === 0 && <p>No work orders match these filters.</p>}
-      <div className="production-grid">{visibleWorkOrders.map((workOrder) => <WorkOrderCard key={workOrder.id} workOrder={workOrder} machines={data?.machines ?? []} onChanged={refresh} />)}</div>
+      <div className="production-grid">{pagedWorkOrders.map((workOrder) => <WorkOrderCard key={workOrder.id} workOrder={workOrder} machines={data?.machines ?? []} onChanged={refresh} />)}</div>
+      {visibleWorkOrders.length > PAGE_SIZE && (
+        <div className="production-actions" style={{ justifyContent: "space-between" }}>
+          <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(visibleWorkOrders.length, page * PAGE_SIZE)} of {visibleWorkOrders.length}</span>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
+            <span>Page {page} of {pageCount}</span>
+            <button type="button" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</button>
+          </div>
+        </div>
+      )}
     </section>
   </div>;
 }

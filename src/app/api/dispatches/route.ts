@@ -13,6 +13,7 @@ import { recomputeDispatchStatus, recordStatusChanges } from "@/lib/order-status
 import { enqueueAlert } from "@/lib/alerts/outbox";
 import { postLedgerEntry } from "@/lib/ledger";
 import { notReversed } from "@/lib/reversals";
+import { parsePageParams } from "@/lib/pagination";
 
 // 15% over-production allowance — rolls rarely sum to exactly qtyMetres, and
 // this mirrors industry standard textile mill tolerances and seeded demo rolls.
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest) {
 
     const where: Prisma.DispatchWhereInput = {};
     if (buyerId) where.buyerId = buyerId;
+    const { paginated, page, pageSize, skip, take } = parsePageParams(searchParams);
 
     const dispatches = await db.dispatch.findMany({
       where,
@@ -41,9 +43,14 @@ export async function GET(req: NextRequest) {
         },
       },
       orderBy: { dispatchedAt: "desc" },
+      ...(paginated ? { skip, take } : {}),
     });
 
-    return NextResponse.json(dispatches);
+    // Bare array kept for existing unpaginated callers; a `page` param
+    // switches to {dispatches,total} so the history tab can show a pager.
+    if (!paginated) return NextResponse.json(dispatches);
+    const total = await db.dispatch.count({ where });
+    return NextResponse.json({ dispatches, total, page, pageSize });
   } catch (err) {
     console.error("Failed to fetch dispatches:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

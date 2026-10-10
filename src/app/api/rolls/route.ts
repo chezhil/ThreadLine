@@ -11,6 +11,7 @@ import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { recomputeRollAggregates, recordStatusChanges } from "@/lib/order-status";
 import { presentRolls, rollInclude } from "@/lib/quality/roll-view";
 import { lotServesOrder } from "@/lib/quality/lineage";
+import { parsePageParams } from "@/lib/pagination";
 
 
 export async function GET(req: NextRequest) {
@@ -56,13 +57,22 @@ export async function GET(req: NextRequest) {
       ];
     }
 
+    const { paginated, page, pageSize, skip, take } = parsePageParams(searchParams);
+
     const rolls = await db.roll.findMany({
       where,
       include: rollInclude(actor.user.role),
       orderBy: { rollNo: "desc" },
+      ...(paginated ? { skip, take } : {}),
     });
+    const presented = await presentRolls(rolls);
 
-    return NextResponse.json(await presentRolls(rolls));
+    // Unpaginated requests keep the original bare-array shape (every
+    // existing caller expects that); a `page` param switches to the
+    // {rolls,total} shape so the list page can show a pager.
+    if (!paginated) return NextResponse.json(presented);
+    const total = await db.roll.count({ where });
+    return NextResponse.json({ rolls: presented, total, page, pageSize });
   } catch (err) {
     console.error("Failed to fetch rolls:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

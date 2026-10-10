@@ -8,3 +8,4 @@ export * from "./Drawer";
 export * from "./EmptyState";
 export * from "./ConfirmButton";
 export * from "./Textarea";
+export * from "./Pager";

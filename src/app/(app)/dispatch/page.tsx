@@ -34,6 +34,9 @@ export default function DispatchPage() {
   const [availableRolls, setAvailableRolls] = useState<any[]>([]);
   const [selectedRollIds, setSelectedRollIds] = useState<string[]>([]);
   const [dispatches, setDispatches] = useState<any[]>([]);
+  const [dispatchTotal, setDispatchTotal] = useState(0);
+  const [dispatchPage, setDispatchPage] = useState(1);
+  const DISPATCH_PAGE_SIZE = 30;
   const [activeTab, setActiveTab] = useState<"new" | "history">("new");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -77,11 +80,13 @@ export default function DispatchPage() {
           }
         }
 
-        // 2. Fetch past dispatches
-        const dispatchesRes = await fetch("/api/dispatches");
+        // 2. Fetch past dispatches (paginated — history can run into the
+        // hundreds once a mill's been running a while)
+        const dispatchesRes = await fetch(`/api/dispatches?page=${dispatchPage}&pageSize=${DISPATCH_PAGE_SIZE}`);
         if (dispatchesRes.ok) {
           const dispData = await dispatchesRes.json();
-          setDispatches(dispData);
+          setDispatches(dispData.dispatches);
+          setDispatchTotal(dispData.total);
         }
       } catch (err) {
         console.warn("Offline or load error:", err);
@@ -90,7 +95,7 @@ export default function DispatchPage() {
       }
     };
     load();
-  }, [reloadKey]);
+  }, [reloadKey, dispatchPage]);
   useRealtimeEvent(RealtimeEvents.QcCompleted, () => {
     loadData();
   });
@@ -328,7 +333,7 @@ export default function DispatchPage() {
               : "border-transparent text-slate-500 hover:text-slate-900"
           }`}
         >
-          Dispatch History ({dispatches.length})
+          Dispatch History ({dispatchTotal})
         </button>
       </div>
 
@@ -635,6 +640,30 @@ export default function DispatchPage() {
             </Table>
           )}
         </Card>
+      )}
+
+      {activeTab === "history" && dispatchTotal > DISPATCH_PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3 px-1 text-xs text-slate-500">
+          <span>
+            {(dispatchPage - 1) * DISPATCH_PAGE_SIZE + 1}–{Math.min(dispatchTotal, dispatchPage * DISPATCH_PAGE_SIZE)} of {dispatchTotal}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={dispatchPage <= 1} onClick={() => setDispatchPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <span className="tabular-nums">
+              Page {dispatchPage} of {Math.max(1, Math.ceil(dispatchTotal / DISPATCH_PAGE_SIZE))}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={dispatchPage >= Math.ceil(dispatchTotal / DISPATCH_PAGE_SIZE)}
+              onClick={() => setDispatchPage((p) => p + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* QR Scanner */}
