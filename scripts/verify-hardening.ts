@@ -7,6 +7,7 @@
 // Writes real rows; run it against a freshly seeded scratch database.
 /* eslint-disable @typescript-eslint/no-explicit-any -- the checks read loosely shaped JSON responses */
 import { PrismaClient } from "@prisma/client";
+import { ledgerInvariants } from "./lib/invariants";
 
 const BASE = process.env.BASE ?? "http://localhost:3000";
 const db = new PrismaClient();
@@ -312,42 +313,9 @@ async function main() {
   check("CSV is owner-only", (await store("GET", `/api/accounts/month-end/export?month=${month}`)).status === 403);
 
   // ---------------------------------------------------- ledger invariants
+  // Reversal-aware: a reversed row also has exactly one reversing entry.
   console.log("\n# Ledger invariants (database)");
-  const [invoices, payments, expensesAll, entries] = await Promise.all([
-    db.invoice.findMany({ select: { id: true, subtotal: true, orderId: true } }),
-    db.payment.findMany({ select: { id: true, amount: true, invoice: { select: { orderId: true } } } }),
-    db.expense.findMany({ select: { id: true, amount: true, orderId: true } }),
-    db.ledgerEntry.findMany(),
-  ]);
-  const bySource = new Map<string, typeof entries>();
-  for (const e of entries) bySource.set(`${e.sourceType}:${e.sourceId}`, [...(bySource.get(`${e.sourceType}:${e.sourceId}`) ?? []), e]);
-  const bad: string[] = [];
-  for (const i of invoices) {
-    const l = bySource.get(`Invoice:${i.id}`) ?? [];
-    if (l.length !== 1 || Math.abs(l[0].amount - i.subtotal) > 0.005 || l[0].orderId !== i.orderId) bad.push(`invoice ${i.id}`);
-  }
-  for (const p of payments) {
-    const l = bySource.get(`Payment:${p.id}`) ?? [];
-    if (l.length !== 1 || Math.abs(l[0].amount - p.amount) > 0.005 || l[0].orderId !== p.invoice.orderId) bad.push(`payment ${p.id}`);
-  }
-  for (const x of expensesAll) {
-    const l = bySource.get(`Expense:${x.id}`) ?? [];
-    if (l.length !== 1 || Math.abs(l[0].amount - x.amount) > 0.005) bad.push(`expense ${x.id}`);
-  }
-  check(`every invoice/payment/expense has exactly one matching ledger entry (${invoices.length + payments.length + expensesAll.length} rows)`, bad.length === 0, bad.slice(0, 10));
-  const orphans = entries.filter((e) => !["Invoice", "Payment", "Expense"].includes(e.sourceType));
-  check("no ledger entry with an unknown source type", orphans.length === 0, orphans.slice(0, 3));
-
-  // Payment status agrees with the ledger for every invoiced order.
-  const orders = await db.order.findMany({ where: { invoices: { some: {} } }, include: { invoices: true } });
-  const wrong: string[] = [];
-  for (const o of orders) {
-    const total = o.invoices.reduce((s, i) => s + i.total, 0);
-    const paid = entries.filter((e) => e.orderId === o.id && e.type === "payment_received").reduce((s, e) => s + e.amount, 0);
-    const expected = paid <= 0.005 ? "UNPAID" : paid + 0.005 >= total ? "PAID" : "PARTIAL";
-    if (o.paymentStatus !== expected) wrong.push(`${o.orderNo}: ${o.paymentStatus} vs ${expected}`);
-  }
-  check(`paymentStatus matches the ledger on all ${orders.length} invoiced orders`, wrong.length === 0, wrong);
+  for (const r of await ledgerInvariants(db)) check(r.name, r.ok, r.detail);
 
   console.log(`\n${passes} passed, ${failures} failed`);
   await db.$disconnect();
