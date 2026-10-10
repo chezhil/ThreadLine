@@ -140,6 +140,42 @@ async function main() {
     await drain();
     check("unknown template: fails permanently, nothing sent", (await get(noText.id)).status === "FAILED" && calls.length === 0);
 
+    // ---- 3b. Approved templates ---------------------------------------------
+    respond = () => ({ status: 200, json: { messages: [{ id: `wamid.${tag}.${++n}` }] } });
+    process.env.WHATSAPP_TEMPLATE_ORDER_DISPATCHED = "order_dispatched_v1";
+    calls.length = 0;
+    const tpl = await enqueueAlert({
+      channel: "WHATSAPP",
+      recipient: phone(),
+      templateName: "order_dispatched",
+      payload: { orderNo: `ORD-${tag}`, buyerName: "Test\nBuyer\t Ltd", trackingPath: "/track/tok123" }, // no truck, newline in name
+    });
+    await drain();
+    const tc = calls[0] as unknown as { body: { type: string; template: { name: string; language: { code: string }; components: { type: string; parameters: { type: string; text: string }[] }[] } } };
+    check("template configured: sent as a template message", tc?.body.type === "template" && tc.body.template.name === "order_dispatched_v1" && tc.body.template.language.code === "en", tc?.body);
+    const params = tc?.body.template.components[0].parameters.map((x) => x.text);
+    check("template params: ordered, newlines flattened, missing value becomes '-'", JSON.stringify(params) === JSON.stringify(["Test Buyer Ltd", `ORD-${tag}`, "-", "https://mill.example/track/tok123"]), params);
+    check("template send stores the provider id", !!(await get(tpl.id)).providerMessageId);
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    calls.length = 0;
+    await queue(phone());
+    await drain();
+    const noLink = calls[0] as unknown as typeof tc;
+    check("no public URL configured: link param is '-', never empty", noLink?.body.template.components[0].parameters.at(-1)?.text === "-");
+    process.env.NEXT_PUBLIC_APP_URL = "https://mill.example";
+    delete process.env.WHATSAPP_TEMPLATE_ORDER_DISPATCHED;
+    calls.length = 0;
+    await queue(phone());
+    await drain();
+    check("no template configured: falls back to plain text", calls[0]?.body.type === "text");
+
+    // ---- 3c. Outbox drain endpoint auth ------------------------------------
+    const proc = await import("../src/app/api/alerts/outbox/process/route");
+    const hit = (headers: Record<string, string> = {}) => proc.POST(new NextRequest("http://localhost/api/alerts/outbox/process", { method: "POST", headers }));
+    process.env.ALERT_WORKER_TOKEN = "worker_tok_123";
+    check("drain: right worker token → 200 (wrong/no token cases are checked over HTTP in verify-whatsapp-preview)", (await hit({ "x-worker-token": "worker_tok_123" })).status === 200);
+    delete process.env.ALERT_WORKER_TOKEN;
+
     // ---- 4. Webhook handshake ----------------------------------------------
     const hs = (qs: string) => route.GET(new NextRequest(`http://localhost/api/webhooks/whatsapp?${qs}`));
     const ok = await hs(`hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}&hub.challenge=abc123`);

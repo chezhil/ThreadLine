@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { Prisma } from "@prisma/client";
-import { messageForAlert, sendWhatsAppText, whatsappConfigured } from "./whatsapp-cloud";
+import { configuredTemplate, messageForAlert, sendWhatsApp, templateParams, whatsappConfigured } from "./whatsapp-cloud";
 
 const SEND_LEASE_MS = 5 * 60 * 1000;
 
@@ -86,9 +86,15 @@ export async function deliverAlert(alert: {
     const payload = JSON.parse(alert.payload) as Record<string, unknown>; // not valid JSON counts as a failed delivery
 
     if (alert.channel === "WHATSAPP" && whatsappConfigured()) {
-      const text = messageForAlert(alert.templateName, payload);
-      if (!text) return { success: false, permanent: true, error: `No WhatsApp message text for template "${alert.templateName ?? "(none)"}"` };
-      const sent = await sendWhatsAppText(alert.recipient, text);
+      // An approved Meta template can start a conversation at any time; plain
+      // text only reaches buyers who wrote to the mill in the last 24h.
+      const template = configuredTemplate(alert.templateName);
+      const params = template ? templateParams(alert.templateName, payload) : null;
+      const text = template && params ? null : messageForAlert(alert.templateName, payload);
+      if (!(template && params) && !text) {
+        return { success: false, permanent: true, error: `No WhatsApp message text for template "${alert.templateName ?? "(none)"}"` };
+      }
+      const sent = await sendWhatsApp(alert.recipient, template && params ? { type: "template", name: template, params } : { type: "text", body: text! });
       return sent.ok
         ? { success: true, providerMessageId: sent.messageId }
         : { success: false, permanent: sent.permanent, error: sent.error };

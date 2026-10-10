@@ -69,4 +69,15 @@ The exported [executive dashboard](design/stitch/README.md) is available at
 - **Open in WhatsApp** (dispatch page / order page) builds the buyer message on the server and opens a click-to-chat link. It needs no setup.
 - **Automatic buyer alerts** (order ready, order dispatched) go through the delivery outbox. With `WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` set they are sent through the WhatsApp Cloud API (run `npm run alerts:worker`, or use "Process now" on the Alerts page); without them they are simulated.
 - **Receipts:** point the Meta app's webhook at `https://<host>/api/webhooks/whatsapp` with `WHATSAPP_VERIFY_TOKEN` and `WHATSAPP_APP_SECRET` set. Delivered/read/failed receipts then show on the outbox card. Requests without a valid `X-Hub-Signature-256` are rejected.
-- Meta only allows business-initiated free text inside the 24h window after the buyer last messaged the mill's number; outside it the send fails with Meta's reason on the outbox row. Registering message templates is the next step for production use.
+- Meta only allows business-initiated free text inside the 24h window after the buyer last messaged the mill's number; outside it the send fails with Meta's reason on the outbox row. For production, register these two **Utility** templates in WhatsApp Manager (language `en`), then put their names in `WHATSAPP_TEMPLATE_ORDER_READY` / `WHATSAPP_TEMPLATE_ORDER_DISPATCHED`:
+  - order ready: `Everest Textile Mills: Dear {{1}}, your order {{2}} has passed quality checks and is ready for dispatch. Track it live: {{3}}`
+  - order dispatched: `Everest Textile Mills: Dear {{1}}, your order {{2}} is on its way on vehicle {{3}}. Track it live: {{4}}`
+  - Set `NEXT_PUBLIC_APP_URL` to the public site address, or `{{3}}`/`{{4}}` is sent as `-`.
+
+### Going live checklist
+1. Meta for Developers: create a Business app, add the WhatsApp product, note the **Phone number ID**, create a permanent **System User access token** (`whatsapp_business_messaging`), and copy the **App secret**.
+2. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` (any long random string you choose) and `NEXT_PUBLIC_APP_URL` on the host (Railway variables), then redeploy.
+3. WhatsApp → Configuration → Webhook: callback URL `https://<host>/api/webhooks/whatsapp`, the same verify token, and subscribe to the `messages` field (that is where delivery receipts arrive).
+4. Submit the two templates above; set the template env vars once they are approved.
+5. Set `ALERT_WORKER_TOKEN` (any long random string): the web process then drains the outbox every 15 s by itself. (Alternatively run `npm run alerts:worker` as a second service.)
+6. Check `/api/health` shows `"whatsapp": true`, dispatch a test order to your own number, and watch it go Delivered → Read on the Alerts page outbox card.

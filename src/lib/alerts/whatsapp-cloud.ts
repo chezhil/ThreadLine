@@ -7,9 +7,11 @@ import { normalizeWhatsAppPhone } from "./whatsapp-format";
 //
 // Meta only lets a business start a conversation with an approved *template*;
 // free text is delivered only inside the 24h window after the customer last
-// wrote. This sends plain text — if buyers haven't messaged the mill's number,
-// Meta rejects it (error 131047) and the row ends FAILED with that reason,
-// which is the cue to register templates and switch to type "template".
+// wrote. So each alert uses its approved template when one is configured
+// (WHATSAPP_TEMPLATE_ORDER_READY / WHATSAPP_TEMPLATE_ORDER_DISPATCHED, language
+// WHATSAPP_TEMPLATE_LANG) and falls back to plain text otherwise. Without a
+// template, a buyer who hasn't messaged the mill's number gets Meta error
+// 131047 and the row ends FAILED with that reason.
 
 const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION ?? "v21.0";
 const TIMEOUT_MS = Number(process.env.WHATSAPP_TIMEOUT_MS ?? 15_000);
@@ -43,7 +45,41 @@ export function messageForAlert(templateName: string | null, payload: Record<str
   }
 }
 
+/**
+ * Body parameters for each template, in the order of the {{1}}, {{2}}… slots
+ * the template was registered with (see README). Meta rejects empty
+ * parameters and parameters containing newlines/tabs, so values are cleaned
+ * and missing ones become "-".
+ */
+export function templateParams(templateName: string | null, payload: Record<string, unknown>): string[] | null {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const link = typeof payload.trackingPath === "string" && base ? `${base}${payload.trackingPath}` : "";
+  const clean = (v: unknown) => (String(v ?? "").replace(/[\n\r\t]+/g, " ").replace(/ {2,}/g, " ").trim().slice(0, 500) || "-");
+  switch (templateName) {
+    case "order_ready":
+      return [clean(payload.buyerName), clean(payload.orderNo), clean(link)];
+    case "order_dispatched":
+      return [clean(payload.buyerName), clean(payload.orderNo), clean(payload.truckNo), clean(link)];
+    default:
+      return null;
+  }
+}
+
+/** The approved Meta template registered for this alert, if one is configured. */
+export function configuredTemplate(templateName: string | null): string | null {
+  const name = templateName === "order_ready" ? process.env.WHATSAPP_TEMPLATE_ORDER_READY : templateName === "order_dispatched" ? process.env.WHATSAPP_TEMPLATE_ORDER_DISPATCHED : undefined;
+  return name?.trim() || null;
+}
+
+export type CloudMessage =
+  | { type: "text"; body: string }
+  | { type: "template"; name: string; params: string[] };
+
 export async function sendWhatsAppText(recipient: string, body: string): Promise<CloudSendResult> {
+  return sendWhatsApp(recipient, { type: "text", body });
+}
+
+export async function sendWhatsApp(recipient: string, message: CloudMessage): Promise<CloudSendResult> {
   const to = normalizeWhatsAppPhone(recipient);
   if (!to) return { ok: false, permanent: true, error: `"${recipient}" is not a usable phone number` };
 
@@ -54,7 +90,21 @@ export async function sendWhatsAppText(recipient: string, body: string): Promise
     res = await fetch(`${graphBase()}/${GRAPH_VERSION}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` },
-      body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to, type: "text", text: { preview_url: true, body } }),
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        ...(message.type === "text"
+          ? { type: "text", text: { preview_url: true, body: message.body } }
+          : {
+              type: "template",
+              template: {
+                name: message.name,
+                language: { code: process.env.WHATSAPP_TEMPLATE_LANG ?? "en" },
+                components: [{ type: "body", parameters: message.params.map((text) => ({ type: "text", text })) }],
+              },
+            }),
+      }),
       signal: controller.signal,
     });
   } catch (e) {

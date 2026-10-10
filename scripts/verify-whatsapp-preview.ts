@@ -165,6 +165,10 @@ async function runVerification() {
       const listed = await (await fetch(`${BASE}/api/dispatches`, { headers: { cookie: floorCookie } })).text();
       check("floor's dispatch list carries no buyer phone or tracking token", !/"contact"/.test(listed) && !/trackingToken/.test(listed));
     }
+    const drainUrl = `${BASE}/api/alerts/outbox/process`;
+    check("outbox drain: anonymous → 403", (await fetch(drainUrl, { method: "POST" })).status === 403);
+    check("outbox drain: bogus worker token → 403", (await fetch(drainUrl, { method: "POST", headers: { "x-worker-token": "guess" } })).status === 403);
+    check("outbox drain: storekeeper (not owner) → 403", (await fetch(drainUrl, { method: "POST", headers: { cookie } })).status === 403);
     check("neither id → 400", (await send(cookie, {})).status === 400);
     check("both ids → 400", (await send(cookie, { dispatchId: dispatch.id, orderId: "x" })).status === 400);
     check("unknown dispatch → 404", (await send(cookie, { dispatchId: "does-not-exist" })).status === 404);
