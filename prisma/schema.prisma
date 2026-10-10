@@ -1,0 +1,237 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  role         String   // owner | storekeeper | floor_supervisor | qc_inspector
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model Supplier {
+  id      String    @id @default(uuid())
+  name    String
+  contact String
+  gstin   String?
+  lots    YarnLot[]
+}
+
+model Buyer {
+  id      String   @id @default(uuid())
+  name    String
+  contact String
+  gstin   String?
+  address String?
+  orders  Order[]
+}
+
+model YarnType {
+  id                  String    @id @default(uuid())
+  name                String
+  count               String
+  material            String
+  colour              String
+  lowStockThresholdKg Float
+  costPerKg           Float
+  lots                YarnLot[]
+}
+
+model YarnLot {
+  id             String                 @id @default(uuid())
+  yarnTypeId     String
+  yarnType       YarnType               @relation(fields: [yarnTypeId], references: [id])
+  supplierId     String
+  supplier       Supplier               @relation(fields: [supplierId], references: [id])
+  lotNo          String
+  qtyReceivedKg  Float
+  qtyRemainingKg Float
+  receivedAt     DateTime
+  linkedOrderId  String?
+  reservations   OrderYarnReservation[]
+  rolls          Roll[]
+}
+
+model Order {
+  id                String                 @id @default(uuid())
+  orderNo           String                 @unique // e.g. EVR-2610-014
+  buyerId           String
+  buyer             Buyer                  @relation(fields: [buyerId], references: [id])
+  fabricType        String
+  colour            String
+  gsm               Int
+  qtyMetres         Float
+  pricePerMetre     Float
+  deadline          DateTime
+  status            String // NEW|CONFIRMED|IN_PRODUCTION|QC|READY|DISPATCHED|CLOSED
+  trackingToken     String                 @unique
+  feasibilityResult String?
+  createdAt         DateTime               @default(now())
+  reservations      OrderYarnReservation[]
+  workOrders        WorkOrder[]
+  rolls             Roll[]
+  invoices          Invoice[]
+}
+
+model OrderYarnReservation {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  yarnLotId String
+  yarnLot   YarnLot @relation(fields: [yarnLotId], references: [id])
+  qtyKg     Float
+}
+
+model Machine {
+  id                     String          @id @default(uuid())
+  name                   String
+  type                   String // spinning|loom|dyeing
+  status                 String // RUNNING|IDLE|BREAKDOWN|MAINTENANCE
+  capacityMetresPerShift Float
+  workOrders             WorkOrder[]
+  productionLogs         ProductionLog[]
+  rolls                  Roll[]
+}
+
+model WorkOrder {
+  id             String          @id @default(uuid())
+  orderId        String
+  order          Order           @relation(fields: [orderId], references: [id])
+  stage          String // spinning|weaving|dyeing
+  machineId      String
+  machine        Machine         @relation(fields: [machineId], references: [id])
+  plannedQty     Float
+  producedQty    Float           @default(0)
+  status         String
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  productionLogs ProductionLog[]
+  rolls          Roll[]
+}
+
+model ProductionLog {
+  id          String    @id @default(uuid())
+  workOrderId String
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id])
+  machineId   String
+  machine     Machine   @relation(fields: [machineId], references: [id])
+  shift       String
+  qtyProduced Float
+  loggedAt    DateTime  @default(now())
+  loggedBy    String
+}
+
+model Roll {
+  id           String     @id @default(uuid())
+  rollNo       String     @unique
+  orderId      String
+  order        Order      @relation(fields: [orderId], references: [id])
+  workOrderId  String
+  workOrder    WorkOrder  @relation(fields: [workOrderId], references: [id])
+  machineId    String
+  machine      Machine    @relation(fields: [machineId], references: [id])
+  shift        String
+  yarnLotId    String
+  yarnLot      YarnLot    @relation(fields: [yarnLotId], references: [id])
+  lengthMetres Float
+  weightKg     Float
+  qcStatus     String // PENDING|PASS|REWORK|REJECT
+  dispatchId   String?
+  dispatch     Dispatch?  @relation(fields: [dispatchId], references: [id])
+  qrToken      String     @unique
+  qcRecords    QCRecord[]
+}
+
+model QCRecord {
+  id          String   @id @default(uuid())
+  rollId      String
+  roll        Roll     @relation(fields: [rollId], references: [id])
+  inspectorId String
+  result      String // PASS|REWORK|REJECT
+  defects     String // JSON-encoded string array: hole|colour_mismatch|uneven_weave
+  notes       String?
+  inspectedAt DateTime @default(now())
+}
+
+model Dispatch {
+  id           String   @id @default(uuid())
+  buyerId      String
+  truckNo      String
+  dispatchedAt DateTime @default(now())
+  invoiceId    String?
+  rolls        Roll[]
+}
+
+model Invoice {
+  id        String    @id @default(uuid())
+  invoiceNo String    @unique
+  orderId   String
+  order     Order     @relation(fields: [orderId], references: [id])
+  buyerId   String
+  subtotal  Float
+  gst       Float
+  total     Float
+  status    String
+  payments  Payment[]
+}
+
+model Payment {
+  id         String   @id @default(uuid())
+  invoiceId  String
+  invoice    Invoice  @relation(fields: [invoiceId], references: [id])
+  amount     Float
+  receivedAt DateTime @default(now())
+  mode       String
+}
+
+model Worker {
+  id         String       @id @default(uuid())
+  name       String
+  dailyWage  Float
+  role       String
+  attendance Attendance[]
+}
+
+model Attendance {
+  id        String   @id @default(uuid())
+  workerId  String
+  worker    Worker   @relation(fields: [workerId], references: [id])
+  date      DateTime
+  shift     String
+  status    String // present|absent|half_day
+  machineId String?
+}
+
+model Expense {
+  id       String   @id @default(uuid())
+  category String // yarn|wages|power|overhead|other
+  amount   Float
+  date     DateTime
+  orderId  String?
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  type      String
+  message   String
+  severity  String // info|warning|critical
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id       String   @id @default(uuid())
+  entity   String
+  entityId String
+  action   String
+  oldValue String?
+  newValue String?
+  userId   String
+  at       DateTime @default(now())
+}
