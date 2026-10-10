@@ -9,14 +9,16 @@ import {
 import { db } from "../src/lib/db";
 
 // Polyfill window & navigator for Node.js execution
+type Listener = (event: { type: string }) => void;
+const testGlobals = globalThis as unknown as Record<string, unknown>;
 if (typeof window === "undefined") {
-  const listeners: Record<string, Function[]> = {};
-  (globalThis as any).window = {
-    addEventListener: (event: string, fn: Function) => {
+  const listeners: Record<string, Listener[]> = {};
+  testGlobals.window = {
+    addEventListener: (event: string, fn: Listener) => {
       listeners[event] = listeners[event] || [];
       listeners[event].push(fn);
     },
-    removeEventListener: (event: string, fn: Function) => {
+    removeEventListener: (event: string, fn: Listener) => {
       if (listeners[event]) {
         listeners[event] = listeners[event].filter((f) => f !== fn);
       }
@@ -35,13 +37,13 @@ if (typeof navigator !== "undefined") {
     configurable: true,
   });
 } else {
-  (globalThis as any).navigator = {
+  testGlobals.navigator = {
     onLine: true,
   };
 }
 
 const BASE = process.env.BASE ?? "http://localhost:3000";
-(globalThis as any).__BASE_URL__ = BASE;
+testGlobals.__BASE_URL__ = BASE;
 
 function getHeaderBadgeText(online: boolean, pendingCount: number) {
   if (!online) {
@@ -73,7 +75,7 @@ async function main() {
   // 1. Authenticate as Owner
   console.log("1. Authenticating as Owner...");
   const cookie = await loginOwner();
-  (globalThis as any).__AUTH_COOKIE__ = cookie;
+  testGlobals.__AUTH_COOKIE__ = cookie;
   console.log("   ✓ Authenticated successfully.\n");
 
   // 2. Setup baseline test rolls
@@ -149,7 +151,7 @@ async function main() {
     livePendingCount = count;
   });
 
-  let m4: any = null;
+  let m4: Awaited<ReturnType<typeof enqueueOfflineMutation>> | null = null;
 
   try {
     // Initial State Check
@@ -161,7 +163,7 @@ async function main() {
 
     // 4. Simulate Network Drop: window.navigator.onLine = false
     console.log("\n4. Simulating Network Drop (navigator.onLine = false)...");
-    (navigator as any).onLine = false;
+    (navigator as { onLine: boolean }).onLine = false;
 
     // Submit 3 Roll Inspections
     console.log("   -> Enqueuing QC Inspection: Roll 1 -> PASS");
@@ -237,7 +239,7 @@ async function main() {
 
     // 7. Simulate Network Reconnect
     console.log("\n7. Simulating Network Reconnect (navigator.onLine = true)...");
-    (navigator as any).onLine = true;
+    (navigator as { onLine: boolean }).onLine = true;
 
     // Trigger FIFO queue drain
     console.log("8. Triggering FIFO queue drain & replay...");

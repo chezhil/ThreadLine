@@ -67,7 +67,7 @@ async function run() {
 
   try {
     // Assert integrity check via PRAGMA
-    const pragmaResult: any = await restoredClient.$queryRawUnsafe("PRAGMA integrity_check");
+    const pragmaResult = await restoredClient.$queryRawUnsafe<{ integrity_check: string }[]>("PRAGMA integrity_check");
     console.log("   ✓ PRAGMA integrity_check result:", pragmaResult[0]);
     if (pragmaResult[0]?.integrity_check !== "ok") {
       throw new Error(`SQLite PRAGMA integrity check failed: ${JSON.stringify(pragmaResult)}`);

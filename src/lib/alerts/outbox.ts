@@ -6,7 +6,7 @@ export type AlertChannel = "WHATSAPP" | "EMAIL" | "SMS" | "IN_APP";
 export interface EnqueueAlertOptions {
   channel: AlertChannel;
   recipient: string;
-  payload: Record<string, any> | string;
+  payload: Record<string, unknown> | string;
   templateName?: string;
   notificationId?: string;
   scheduledFor?: Date;
@@ -15,7 +15,7 @@ export interface EnqueueAlertOptions {
 export async function enqueueAlert(
   channelOrOptions: AlertChannel | EnqueueAlertOptions,
   recipientOrTx?: string | Prisma.TransactionClient,
-  payload?: Record<string, any> | string,
+  payload?: Record<string, unknown> | string,
   templateName?: string,
   tx?: Prisma.TransactionClient
 ) {
@@ -44,7 +44,7 @@ export async function enqueueAlert(
       ? opts.payload
       : JSON.stringify(opts.payload);
 
-  return (client as any).alertDelivery.create({
+  return client.alertDelivery.create({
     data: {
       channel: opts.channel,
       recipient: opts.recipient,
@@ -71,7 +71,7 @@ export async function deliverAlert(alert: {
 }): Promise<{ success: boolean; error?: string }> {
   // Simulate channel delivery or network failure simulation
   try {
-    const parsedPayload = JSON.parse(alert.payload);
+    JSON.parse(alert.payload); // a payload that isn't valid JSON counts as a failed delivery
     // Simulated failure test case if recipient is marked 'FAIL' or invalid
     if (alert.recipient.includes("invalid") || alert.recipient === "simulate-failure") {
       throw new Error(`Carrier rejected destination recipient: ${alert.recipient}`);
@@ -79,8 +79,8 @@ export async function deliverAlert(alert: {
 
     // In dev / production simulator, log successful dispatch
     return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message ?? "Unknown delivery failure" };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Unknown delivery failure" };
   }
 }
 
