@@ -1,0 +1,43 @@
+name: Verify ThreadLine
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: file:./ci.db
+      PORT: 3100
+      BASE: http://localhost:3100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run seed
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+      - run: npm audit --omit=dev
+      - run: npx tsx scripts/verify-costing.ts
+      - run: npx tsx scripts/verify-assistant.ts
+      - run: npx tsx scripts/verify-module3.ts
+      - name: Start application
+        run: |
+          npm run dev > /tmp/threadline-server.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent "$BASE/manifest.json" > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/threadline-server.log
+          exit 1
+      - run: node scripts/verify-integration.mjs
+      - run: node scripts/verify-accounts-api.mjs
