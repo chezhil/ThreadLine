@@ -72,3 +72,13 @@ export function writeTransaction<T>(
   globalForLock.threadlineWriteQueue = next.catch(() => undefined);
   return next;
 }
+
+/** Runs `fn` with no write transaction in flight and none starting until it
+ * finishes (same queue as writeTransaction). For whole-file operations such
+ * as a database restore. Never call writeTransaction from inside `fn`. */
+export function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = globalForLock.threadlineWriteQueue ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  globalForLock.threadlineWriteQueue = next.catch(() => undefined);
+  return next;
+}

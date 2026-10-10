@@ -47,4 +47,5 @@ next-env.d.ts
 prisma/*.db
 prisma/*.db-journal
 prisma/*.db.bak.*
+prisma/*.tmp
 !.env.example
