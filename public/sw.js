@@ -50,8 +50,10 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Cache valid responses
-        if (response && response.status === 200 && response.type === "basic") {
+        // Cache valid responses. A redirected response is the login page standing
+        // in for the URL asked for (signed out); caching it would serve the login
+        // page offline.
+        if (response && response.status === 200 && response.type === "basic" && !response.redirected) {
           const responseToCache = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
