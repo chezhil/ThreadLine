@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type { PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "../db";
 import { emit, RealtimeEvents } from "../realtime";
@@ -74,20 +75,21 @@ export async function syncDerivedAlerts(db: PrismaClient = defaultDb) {
     });
     const existing = new Set(open.map((n) => n.type));
 
-    for (const n of open) {
-      if (!live.has(n.type)) {
-        await tx.notification.update({
-          where: { id: n.id },
-          data: { read: true, type: `${n.type}:cleared:${Date.now()}` },
-        });
-      }
+    // One round trip per stale/new row used to mean a transaction scaled
+    // with the mill's order count — fine for a handful of orders, but with
+    // hundreds of READY orders (each its own order_ready condition) it blew
+    // past Prisma's interactive-transaction timeout and the transaction got
+    // killed mid-write (P2028 "Transaction not found"). Batched instead.
+    const stale = open.filter((n) => !live.has(n.type));
+    if (stale.length) {
+      const ts = Date.now();
+      await Promise.all(
+        stale.map((n) => tx.notification.update({ where: { id: n.id }, data: { read: true, type: `${n.type}:cleared:${ts}` } })),
+      );
     }
-    const newlyCreated = [];
-    for (const c of conditions) {
-      if (existing.has(c.type)) continue;
-      newlyCreated.push(await tx.notification.create({ data: c }));
-    }
-    return newlyCreated;
+    const toCreate = conditions.filter((c) => !existing.has(c.type)).map((c) => ({ id: randomUUID(), ...c }));
+    if (toCreate.length) await tx.notification.createMany({ data: toCreate });
+    return toCreate;
   });
   for (const n of created) emit(RealtimeEvents.NotificationNew, n);
 }

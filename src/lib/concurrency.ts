@@ -61,13 +61,21 @@ export function writeTransaction<T>(
   const client = typeof a === "function" ? db : a;
   const fn = typeof a === "function" ? a : b!;
   const run = () =>
-    client.$transaction(async (tx) => {
-      // A write that touches no rows still takes the write lock. Postgres
-      // requires an actual boolean here (unlike SQLite, which accepted the
-      // integer 0 as falsy) — `WHERE 0` errors with 42804 on Postgres.
-      await tx.$executeRawUnsafe('UPDATE "User" SET "id" = "id" WHERE false');
-      return fn(tx);
-    });
+    client.$transaction(
+      async (tx) => {
+        // A write that touches no rows still takes the write lock. Postgres
+        // requires an actual boolean here (unlike SQLite, which accepted the
+        // integer 0 as falsy) — `WHERE 0` errors with 42804 on Postgres.
+        await tx.$executeRawUnsafe('UPDATE "User" SET "id" = "id" WHERE false');
+        return fn(tx);
+      },
+      // Prisma's 5s default assumed SQLite's near-zero round-trip latency;
+      // over the cloud DB a transaction with more than a few sequential
+      // queries can genuinely take longer than that and get killed mid-write
+      // (P2028 "Transaction not found") even though nothing is actually
+      // stuck — see src/lib/accounts/alerts.ts's history for a real case.
+      { timeout: 20_000 },
+    );
   const prev = globalForLock.threadlineWriteQueue ?? Promise.resolve();
   const next = prev.then(run, run);
   // The queue must keep going whether this transaction succeeds or fails.

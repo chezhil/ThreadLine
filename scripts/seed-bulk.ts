@@ -68,6 +68,25 @@ async function main() {
   const dyeing = machines.filter((m) => m.type === "dyeing");
   const floorUser = users.find((u) => u.role === "floor_supervisor") ?? users[0];
   const qcUser = users.find((u) => u.role === "qc_inspector") ?? users[0];
+  const ownerUser = users.find((u) => u.role === "owner") ?? users[0];
+
+  // The real app logs an AuditLog row (via logAudit()) every time an order's
+  // legacy status actually changes, driven by a real work order/roll/invoice
+  // write. This seed writes final rows directly, bypassing those writes
+  // entirely — so without this, the Audit Trail page has nothing to show for
+  // any seeded order. Not a faithful replay of every intermediate write, just
+  // the status milestones each bucket implies, so the page has real-looking
+  // history to page through.
+  const STATUS_CHAIN: Record<Bucket, string[]> = {
+    NEW: [],
+    CONFIRMED: ["CONFIRMED"],
+    IN_PRODUCTION: ["CONFIRMED", "IN_PRODUCTION"],
+    QC: ["CONFIRMED", "IN_PRODUCTION", "QC"],
+    READY: ["CONFIRMED", "IN_PRODUCTION", "QC", "READY"],
+    DISPATCHED: ["CONFIRMED", "IN_PRODUCTION", "QC", "READY", "DISPATCHED"],
+    CLOSED: ["CONFIRMED", "IN_PRODUCTION", "QC", "READY", "DISPATCHED", "CLOSED"],
+  };
+  const auditLogs: Prisma.AuditLogCreateManyInput[] = [];
 
   const fabricTypes = ["Poplin", "Twill", "Denim", "Dobby", "Canvas", "Satin", "Chambray"];
   const colours = ["White", "Navy", "Black", "Maroon", "Olive", "Grey", "Indigo"];
@@ -114,6 +133,25 @@ async function main() {
       feasibilityResult: "FEASIBLE",
       createdAt,
     });
+
+    const chain = STATUS_CHAIN[bucket];
+    if (chain.length && ownerUser) {
+      const span = Math.max(1, now - createdAt.getTime());
+      let prev = "NEW";
+      chain.forEach((next, idx) => {
+        auditLogs.push({
+          id: randomUUID(),
+          entity: "Order",
+          entityId: orderId,
+          action: "status_change",
+          oldValue: JSON.stringify({ status: prev }),
+          newValue: JSON.stringify({ status: next }),
+          userId: ownerUser.id,
+          at: new Date(createdAt.getTime() + (span * (idx + 1)) / (chain.length + 1)),
+        });
+        prev = next;
+      });
+    }
 
     if (!hasWorkOrders) continue;
 
@@ -247,6 +285,7 @@ async function main() {
   await chunked("qcRecords", qcRecords, (batch) => db.qCRecord.createMany({ data: batch }));
   await chunked("invoices", invoices, (batch) => db.invoice.createMany({ data: batch }));
   await chunked("payments", payments, (batch) => db.payment.createMany({ data: batch }));
+  await chunked("auditLogs", auditLogs, (batch) => db.auditLog.createMany({ data: batch }));
 
   console.log("Backfilling ledger entries...");
   const backfilled = await backfillLedgerEntries(db);
