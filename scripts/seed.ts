@@ -42,9 +42,10 @@ async function main() {
     { name: "Nandan Textrade", contact: "+91 98765 33333", gstin: "27AASFS9012C1Z8" },
     { name: "Vardhman Cotspin", contact: "+91 98765 44444", gstin: null },
   ];
+  // Find-or-create throughout, so running the seed twice adds nothing.
   const suppliers = [];
   for (const s of supplierNames) {
-    suppliers.push(await db.supplier.create({ data: s }));
+    suppliers.push((await db.supplier.findFirst({ where: { name: s.name } })) ?? (await db.supplier.create({ data: s })));
   }
 
   console.log("Seeding buyers...");
@@ -57,7 +58,7 @@ async function main() {
   ];
   const buyers = [];
   for (const b of buyerNames) {
-    buyers.push(await db.buyer.create({ data: b }));
+    buyers.push((await db.buyer.findFirst({ where: { name: b.name } })) ?? (await db.buyer.create({ data: b })));
   }
 
   console.log("Seeding yarn types and lots...");
@@ -71,7 +72,7 @@ async function main() {
   ];
   const yarnTypes = [];
   for (const yt of yarnTypeDefs) {
-    yarnTypes.push(await db.yarnType.create({ data: yt }));
+    yarnTypes.push((await db.yarnType.findFirst({ where: { name: yt.name } })) ?? (await db.yarnType.create({ data: yt })));
   }
 
   // One yarn type (Cotton 60s) deliberately near its low-stock threshold.
@@ -84,6 +85,7 @@ async function main() {
     { yarnType: yarnTypes[5], supplier: suppliers[1], lotNo: "LOT-F606", qty: 500 },
   ];
   for (const lot of lotDefs) {
+    if (await db.yarnLot.findFirst({ where: { lotNo: lot.lotNo } })) continue;
     await db.yarnLot.create({
       data: {
         yarnTypeId: lot.yarnType.id,
@@ -121,9 +123,11 @@ async function main() {
       today + (isDelayRisk ? 2 * day : isInfeasible ? 3 * day : (10 + i) * day),
     );
 
+    const orderNo = `EVR-2610-${String(i + 1).padStart(3, "0")}`;
+    if (await db.order.findUnique({ where: { orderNo } })) continue;
     await db.order.create({
       data: {
-        orderNo: `EVR-2610-${String(i + 1).padStart(3, "0")}`,
+        orderNo,
         buyerId: buyer.id,
         fabricType: ["Poplin", "Twill", "Denim", "Dobby"][i % 4],
         colour: ["White", "Navy", "Black", "Maroon"][i % 4],
