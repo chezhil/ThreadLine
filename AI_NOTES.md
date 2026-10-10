@@ -235,3 +235,104 @@ scripts. Generated with Claude (Claude Code); pending Dev's review.
   output above rated capacity; the dashboard labels that "over rated" rather than a %.
 - `feature/quality-dispatch` (Module 3) bootstrapped its own Next 14 app; merging it
   with Module 1's Next 16 foundation will need the team to pick one.
+
+---
+
+## Integration — all four modules on `integration/final` (Devacharan, Claude)
+
+Merged `feature/inventory-orders` (via `feature/accounts-ai`), `feature/production`
+and `feature/quality-dispatch` into one branch. Module 1's foundation wins every
+conflict (Next 16, zod 4, Tailwind 4, Prisma 5.22, shared schema, auth, realtime,
+UI kit); the other modules were adapted to it. No teammate's feature was removed.
+
+### Module 2 (production) changes
+- `src/lib/production/auth.ts` used `getSession`, which the foundation doesn't
+  have; it now uses `getCurrentUser` with the same owner/floor-supervisor rule.
+- Screens moved from the `(production)` group to `(app)/production/*`, the URLs
+  the nav and `ROLE_HOME` already used, replacing Module 1's placeholders, with
+  a tabbed, role-gated layout. Machines got a tab (it had no nav entry).
+- Realtime listened on `io()` (default path); the foundation's server is on
+  `/api/socketio`, so the hook now uses the shared `useRealtimeEvent`.
+- `production.css` variables (`--space-4`, `--color-status-running`, …) didn't
+  exist anywhere; they are now defined on `.production-page` from the
+  foundation palette.
+- Audit entries were `JSON.stringify`-ed before `logAudit`, which stringifies
+  again; they now pass objects so the audit trail diff shows fields.
+- `machines/[id]` routes await `params` (Next 16 build failed otherwise).
+- `seedProduction` moved to `scripts/seed-production.ts`, called from the main seed.
+
+### Module 3 (quality/dispatch) changes
+- Module 3 was a separate Next 14 / React 18 / zod 3 / Tailwind 3 app with its
+  own `auth.ts`, `realtime.ts`, `audit.ts`, `tokens.ts` and UI kit. Kept the
+  foundation's versions; Module 3's UI kit (different props, e.g. compound
+  `Table`) lives on under `src/components/quality/ui/` for its pages.
+- Pages moved to `/quality/qc`, `/quality/rolls`, `/quality/rolls/:id`,
+  `/quality/defects` and `/dispatch` inside the app shell. `/qc`, `/rolls`,
+  `/rolls/:id` and `/defects` redirect (next.config) so old links and printed
+  QR labels still work; new labels encode `/quality/rolls/:id`.
+- **No API route checked the session or role.** Added: rolls read = any
+  signed-in user; mint roll = owner/floor/QC; QC = owner/QC; dispatch =
+  owner/storekeeper; defect analytics = owner/QC; backup and restore = owner
+  only (backup hands out every password hash; restore replaces the DB).
+- QC took `inspectorId` from the form (a hard-coded "QC-INSP-01" list); it is
+  now the signed-in user, and roll detail shows the inspector's name.
+- Dispatch invoiced at 18% GST on dispatched metres; Module 1's rule (and its
+  `POST /api/invoices`) is 5% on order qty × price via `computeInvoiceTotals`
+  and `generateInvoiceNo`, so dispatch now uses those. The dispatch preview
+  shows the same rate.
+- Dispatch marked an order DISPATCHED only when *every* roll shipped, so one
+  rejected roll blocked it forever; rejected rolls are now ignored. Rolls are
+  re-claimed inside the transaction (`dispatchId: null, qcStatus: PASS`) so
+  two trucks can't take the same roll; status changes are audited and emitted
+  after commit.
+- Roll creation now checks the work order belongs to the order and that the
+  machine and lot exist, and skips roll numbers already taken.
+- zod 4: `errorMap` → `message`. Next 16: `params` awaited, `export const
+  dynamic` removed (incompatible with Cache Components).
+- React Compiler lint errors fixed (setState in effects, use-before-declare in
+  `QrScannerModal`; online status via `useSyncExternalStore`). The ~40
+  `no-explicit-any` hits in Module 3 files are warnings via a scoped override
+  in `eslint.config.mjs` — typing them is a follow-up for Module 3.
+- The header (`Header.tsx`) became `SyncStatus`: the offline sync pill and
+  queue drawer sit in the app header; Backup/Restore show only for the owner.
+- QR-label print CSS hid everything else on *every* print; it is now scoped to
+  a body class set only while a label prints (Month-end Print works again).
+- Service worker paths updated; one failing pre-cache no longer aborts install.
+  `manifest.json`, `icon.svg`, `sw.js` are public in `proxy.ts`.
+- Module 3's seed wiped the whole DB and created its own users and orders.
+  `scripts/seed-quality.ts` rebuilds the same story on the shared data:
+  82 rolls, Loom 4 behind 7 of 10 rejects (70%), three trucks gone with
+  invoices, 12 PASS rolls waiting, pending rolls in the QC queue. Every roll
+  comes from a weaving work order with production logs, so costing and
+  machine output line up.
+
+### Shared changes
+- `realtime.ts`: added `RollCreated`, `QcCompleted`, `DispatchCompleted`.
+- `/production` and `/quality` redirect to their first tab (breadcrumbs linked
+  to them and 404'd).
+- `.env.example` was ignored by `.env*` and missing; added and un-ignored.
+- Module 4 seed: expenses and crew scaled to the seeded mill's real output
+  (10 workers; power/rent/AMC reduced), otherwise every order showed a 60%
+  loss purely from demo numbers. Thin margins remain, and Loom 4's rejects
+  visibly cost money — that is the data, not a tuning target.
+
+### Verified (on a fresh `npm run seed`)
+- `tsc --noEmit`, `npm run lint` (0 errors), `npm run build` pass.
+- `scripts/verify-costing.ts` (fixture), `verify-assistant.ts`,
+  `verify-accounts-api.mjs`, `verify-module3.ts`.
+- New `scripts/verify-integration.mjs`: role gating on every module, then one
+  order through reserve yarn → work order → production log → roll → QC →
+  two trucks → DISPATCHED → invoice → costing final → audit → assistant.
+- Browser (Playwright, headless Chromium): every page for all four roles at
+  1366px and 390px with no console/page errors, no 4xx/5xx and no horizontal
+  overflow; UI flows for add machine, record output (owner's floor board
+  updates live over the socket), QC reject with defect validation, loading a
+  truck, and the dashboard/payments/audit views of the result.
+
+### Still open
+- Ollama never ran for real here (model registry blocked); assistant was tested
+  against a mock and the keyword fallback.
+- Offline queue + service worker were not exercised offline in a browser.
+- Order QC → READY is still a manual status change (Module 1's order page).
+- Module 1's `npm run seed` is not idempotent (re-running duplicates
+  suppliers/buyers/orders); reset the DB before re-seeding.

@@ -12,6 +12,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { QrScannerModal } from "@/components/rolls/QrScannerModal";
 import { enqueueOfflineMutation } from "@/lib/offline-queue";
+import { GST_RATE } from "@/lib/billing";
 import {
   Truck,
   Scan,
@@ -241,7 +242,7 @@ export default function DispatchPage() {
   const totalWeight = selectedRolls.reduce((acc, r) => acc + r.weightKg, 0);
   const samplePricePerMetre = selectedRolls[0]?.order?.pricePerMetre || 120;
   const subtotal = totalMetres * samplePricePerMetre;
-  const gst = subtotal * 0.18; // 18% GST
+  const gst = subtotal * GST_RATE; // Module 1's GST rate, same as the real invoice
   const invoiceTotal = subtotal + gst;
 
   return (
@@ -470,17 +471,20 @@ export default function DispatchPage() {
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">GST (18%):</span>
+                    <span className="text-slate-600">GST ({GST_RATE * 100}%):</span>
                     <span className="font-semibold text-slate-900">
                       ₹{gst.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between pt-1 border-t border-indigo-200 font-bold text-slate-950 text-sm">
-                    <span>Invoice Total:</span>
+                    <span>Value incl. GST:</span>
                     <span className="text-indigo-700">
                       ₹{invoiceTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
+                  <p className="text-[11px] text-slate-500">
+                    The order&apos;s GST invoice covers its full quantity and is raised once, with its first truck.
+                  </p>
                 </div>
 
                 <Button
