@@ -47,6 +47,12 @@ function LogoutButton() {
       type="button"
       onClick={async () => {
         await fetch("/api/auth/logout", { method: "POST" });
+        // The offline service worker keeps copies of pages and roll lists; don't
+        // leave them for whoever signs in next on this device.
+        if ("caches" in window) {
+          const keys = await caches.keys().catch(() => [] as string[]);
+          await Promise.all(keys.filter((k) => k.startsWith("threadline-")).map((k) => caches.delete(k)));
+        }
         router.push("/login");
         router.refresh();
       }}

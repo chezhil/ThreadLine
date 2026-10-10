@@ -1,4 +1,4 @@
-const CACHE_NAME = "threadline-v2";
+const CACHE_NAME = "threadline-v3";
 const STATIC_ASSETS = [
   "/quality/qc",
   "/quality/rolls",
@@ -37,9 +37,13 @@ self.addEventListener("fetch", (event) => {
   // Only handle GET requests
   if (event.request.method !== "GET") return;
 
-  // Let API requests, the realtime socket and cross-origin requests pass through
+  // Let API requests, the realtime socket and cross-origin requests pass through,
+  // except the roll and dispatch lists: keeping the last copy lets the QC and
+  // dispatch pages show their rolls after a reload with the network down.
+  // (Sign-out clears these caches.)
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) {
+  const offlineReadable = url.pathname === "/api/rolls" || url.pathname.startsWith("/api/rolls/") || url.pathname === "/api/dispatches";
+  if (url.origin !== self.location.origin || (url.pathname.startsWith("/api/") && !offlineReadable)) {
     return;
   }
 
