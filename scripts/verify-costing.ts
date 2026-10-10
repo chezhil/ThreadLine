@@ -1,15 +1,17 @@
 // Hand-checked fixture test for the cost-per-order engine and month summary.
-// Builds a throwaway SQLite DB, inserts a small mill whose costs are worked
+// Builds a throwaway Postgres schema, inserts a small mill whose costs are worked
 // out by hand below, and compares every figure.
 //
 //   npx tsx scripts/verify-costing.ts
 
 import { execSync } from "child_process";
-import { closeSync, existsSync, openSync, rmSync } from "fs";
-import path from "path";
 
-const DB_FILE = path.join(__dirname, "..", "prisma", "verify-costing.db");
-const DATABASE_URL = "file:./verify-costing.db";
+// Runs in its own schema of the database DATABASE_URL points at, so it never
+// touches the real tables.
+const SCHEMA = "verify_costing";
+const baseUrl = new URL(process.env.DATABASE_URL ?? "");
+baseUrl.searchParams.set("schema", SCHEMA);
+const DATABASE_URL = baseUrl.toString();
 
 let failures = 0;
 function eq(name: string, actual: number | string | null | undefined, expected: number | string | null) {
@@ -23,13 +25,13 @@ function eq(name: string, actual: number | string | null | undefined, expected: 
 const ist = (s: string) => new Date(`${s}+05:30`);
 
 async function main() {
-  for (const f of [DB_FILE, `${DB_FILE}-journal`]) if (existsSync(f)) rmSync(f);
-  // Ensure SQLite has a writable file before the Prisma schema engine opens it.
-  closeSync(openSync(DB_FILE, "w"));
-  execSync("npx prisma migrate deploy", { env: { ...process.env, DATABASE_URL }, stdio: "ignore" });
+  const { PrismaClient } = await import("@prisma/client");
+  const admin = new PrismaClient();
+  await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+  await admin.$disconnect();
+  execSync("npx prisma migrate deploy", { env: { ...process.env, DATABASE_URL, DIRECT_URL: DATABASE_URL }, stdio: "ignore" });
   process.env.DATABASE_URL = DATABASE_URL;
 
-  const { PrismaClient } = await import("@prisma/client");
   const { computeCosting, rollCostsForOrder, ordersRealisedIn } = await import("../src/lib/accounts/costing");
   const { monthSummary } = await import("../src/lib/accounts/summary");
   const db = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
@@ -162,7 +164,9 @@ async function main() {
     eq("rolls sum to order total", r1.totalCost + r2.totalCost, a.totalCost);
   } finally {
     await db.$disconnect();
-    for (const f of [DB_FILE, `${DB_FILE}-journal`]) if (existsSync(f)) rmSync(f);
+    const cleanup = new PrismaClient();
+    await cleanup.$executeRawUnsafe(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`).catch(() => undefined);
+    await cleanup.$disconnect();
   }
 
   console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

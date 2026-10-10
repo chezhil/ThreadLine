@@ -32,7 +32,7 @@ Open http://localhost:3000. Seeded demo logins (see `scripts/seed.ts`):
 
 ## Other scripts
 
-- `npm run db:studio` — browse the SQLite DB in Prisma Studio.
+- `npm run db:studio` — browse the database in Prisma Studio.
 - `npm run build` / `npm run start` — production build and run.
 - `npm run lint` — eslint.
 - Checks (start the app on a freshly seeded DB first):

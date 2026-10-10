@@ -5,6 +5,9 @@ import { sqliteFilePath } from "@/lib/quality/db-file";
 import { snapshotTo } from "@/lib/quality/db-snapshot";
 
 export async function GET(_req: NextRequest) {
+  // A full copy of the database (incl. password hashes) — owner only.
+  const actor = await qualityActor("owner");
+  if ("response" in actor) return actor.response;
   // File-level backup only applies to the SQLite file layout; on Postgres
   // (Supabase) use `pg_dump` / Supabase's own backup tooling instead.
   if (!process.env.DATABASE_URL?.startsWith("file:")) {
@@ -13,9 +16,6 @@ export async function GET(_req: NextRequest) {
       { status: 501 },
     );
   }
-  // A full copy of the database (incl. password hashes) — owner only.
-  const actor = await qualityActor("owner");
-  if ("response" in actor) return actor.response;
   const tmp = `${sqliteFilePath()}.backup-${Date.now()}-${process.pid}.tmp`;
   try {
     // A consistent snapshot, not a byte copy of a file that may be mid-write.

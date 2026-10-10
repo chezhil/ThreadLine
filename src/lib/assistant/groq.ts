@@ -42,7 +42,8 @@ export async function groqChat(messages: ChatMessage[], opts: { json?: boolean; 
         // This app's calls are a short JSON tool-pick or a short grounded
         // summary, not multi-step reasoning — low effort keeps latency and
         // reasoning-token cost down with no loss of quality for these tasks.
-        reasoning_effort: "low",
+        // Only the gpt-oss models accept the parameter; others reject it.
+        ...(/gpt-oss/i.test(GROQ_MODEL) ? { reasoning_effort: "low" } : {}),
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
         ...(opts.maxTokens ? { max_completion_tokens: opts.maxTokens } : {}),
       }),
@@ -55,9 +56,16 @@ export async function groqChat(messages: ChatMessage[], opts: { json?: boolean; 
     clearTimeout(timer);
   }
 
-  const json = (await res.json().catch(() => null)) as GroqResponse | null;
+  // Read the body once: a failed json() would leave nothing for text().
+  const bodyText = await res.text().catch(() => "");
+  let json: GroqResponse | null = null;
+  try {
+    json = JSON.parse(bodyText) as GroqResponse;
+  } catch {
+    json = null;
+  }
   if (!res.ok || !json) {
-    const message = json?.error?.message ?? (await res.text().catch(() => "")).slice(0, 200);
+    const message = json?.error?.message ?? bodyText.slice(0, 200);
     if (res.status === 404) {
       throw new GroqUnavailableError(`Model "${GROQ_MODEL}" was not found. Check GROQ_MODEL against https://console.groq.com/docs/models.`);
     }

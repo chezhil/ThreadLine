@@ -31,6 +31,9 @@ export function AssistantClient() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const nextId = useRef(1);
+  // State lags a render behind, so a double-click on a suggestion could
+  // start two requests; the ref closes that gap.
+  const busyRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,6 +54,7 @@ export function AssistantClient() {
   }, []);
 
   async function ask(text: string) {
+    if (busyRef.current) return;
     const parsed = assistantQuerySchema.safeParse({ question: text });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Ask a question");
@@ -59,6 +63,7 @@ export function AssistantClient() {
     setError(null);
     setQuestion("");
     setTurns((t) => [...t, { id: nextId.current++, role: "user", text: parsed.data.question }]);
+    busyRef.current = true;
     setBusy(true);
     try {
       const res = await postJson<AssistantAnswer & { error?: string }>("/api/assistant/query", parsed.data);
@@ -71,6 +76,7 @@ export function AssistantClient() {
     } catch {
       setTurns((t) => [...t, { id: nextId.current++, role: "error", text: "Couldn't reach the server." }]);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -154,7 +160,7 @@ function AnswerBubble({ result }: { result: AssistantAnswer }) {
       <p className="whitespace-pre-wrap text-sm text-foreground">{result.answer}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
         <span className="rounded-full border border-border bg-white px-2 py-0.5">
-          {result.mode === "llm" ? `Local model${result.model ? ` · ${result.model}` : ""}` : "Answered without the model"}
+          {result.mode === "llm" ? `Groq${result.model ? ` · ${result.model}` : ""}` : "Answered without the model"}
         </span>
         {result.tool && (
           <span className="rounded-full border border-border bg-white px-2 py-0.5 font-mono">

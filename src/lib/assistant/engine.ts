@@ -61,9 +61,9 @@ If no tool can answer the question, reply {"tool": null, "args": {}}.`;
     { role: "user", content: question },
   ];
   for (let attempt = 0; attempt < 2; attempt++) {
-    // A plan is a few dozen tokens. The cap stops a model that loops in JSON
+    // A plan is a few dozen tokens, but reasoning tokens count against the cap. It stops a model that loops in JSON
     // mode (seen with very small models) from holding the request until timeout.
-    const raw = await groqChat(messages, { json: true, maxTokens: 256 });
+    const raw = await groqChat(messages, { json: true, maxTokens: 1024 });
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -136,19 +136,23 @@ export function planWithRules(question: string): Plan {
   if (orderNo) return { tool: "orderCost", args: { orderNo: orderNo.toUpperCase() } };
 
   const machine = q.match(/\b(loom|spinning|dyeing|ringframe)\s*\d+\b/)?.[0];
-  if (/reject|rejection|defect rate|quality|rework/.test(q) && (machine || /machine|loom/.test(q)))
+  if (/reject|rejection|defect rate|quality|rework/.test(q))
     return { tool: "machineRejectRate", args: { ...(machine ? { machineName: machine } : {}), ...(days ? { days } : {}) } };
   if (/defect|hole|colour mismatch|color mismatch|uneven weave/.test(q))
     return { tool: "defectsByType", args: days ? { days } : {} };
   if (/profit|loss|margin|profitable|earn/.test(q) && /order/.test(q)) return { tool: "profitByOrder", args: monthArg };
   if (/summary|p&l|p & l|net profit|profit|revenue|expense|spend|gst|cash|month[- ]end/.test(q))
     return { tool: "monthSummary", args: monthArg };
+  // Status words are matched before "produc" so "orders in production" asks
+  // about orders, not machine output.
+  const status = q.match(/\b(new|confirmed|in production|qc|ready|dispatched|closed)\b/)?.[1];
+  if (/\border/.test(q) && (status || /overdue|\blate\b|deadline|delay|dispatch/.test(q)))
+    return { tool: "ordersOverview", args: { ...(status ? { status: status.toUpperCase().replace(" ", "_") } : {}), ...(/overdue|\blate\b|delay/.test(q) ? { overdue: true } : {}) } };
   if (/output|produc|metres|meters|utili[sz]ation/.test(q)) return { tool: "machineOutput", args: days ? { days } : {} };
   if (/yarn|stock|inventory|reorder/.test(q)) return { tool: "yarnStock", args: /low|short|reorder/.test(q) ? { onlyLow: true } : {} };
   if (/outstanding|receivable|unpaid|owe|due|pending payment|collect/.test(q)) return { tool: "outstandingPayments", args: {} };
   if (/attendance|absent|wage|salary|worker|labour|labor/.test(q)) return { tool: "attendanceSummary", args: monthArg };
   if (/alert|notification|warning/.test(q)) return { tool: "recentAlerts", args: {} };
-  const status = q.match(/\b(new|confirmed|in production|qc|ready|dispatched|closed)\b/)?.[1];
   if (/order|deadline|dispatch/.test(q))
     return { tool: "ordersOverview", args: status ? { status: status.toUpperCase().replace(" ", "_") } : {} };
   return { tool: null, args: {} };
@@ -255,7 +259,7 @@ Rules:
 - At most 4 short sentences. No markdown tables.`,
         },
         { role: "user", content: `Question: ${question}\n\nDATA:\n${JSON.stringify(data)}` },
-      ], { maxTokens: 400 }) // at most 4 short sentences
+      ], { maxTokens: 1500 }) // at most 4 short sentences
     ).trim();
   } catch (e) {
     if (!(e instanceof GroqUnavailableError)) throw e;

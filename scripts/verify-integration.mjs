@@ -205,8 +205,13 @@ check("assistant answers a quality question from data", assistant.status === 200
 
 // --- backup + old links ----------------------------------------------------------
 const backup = await owner("GET", "/api/backup");
-const head = Buffer.from(await backup.res.arrayBuffer()).subarray(0, 15).toString();
-check("owner downloads a SQLite backup", backup.status === 200 && head === "SQLite format 3", head);
+if (backup.status === 501) {
+  // Postgres deployment: file backups are intentionally unavailable.
+  check("owner backup: Postgres instance points at provider tooling (501)", /Postgres/.test(backup.json?.error ?? ""), backup.json);
+} else {
+  const head = Buffer.from(await backup.res.arrayBuffer()).subarray(0, 15).toString();
+  check("owner downloads a SQLite backup", backup.status === 200 && head === "SQLite format 3", head);
+}
 const old = await owner("GET", "/qc");
 check("old /qc link redirects to /quality/qc", [307, 308].includes(old.status) && old.headers.get("location")?.endsWith("/quality/qc"), old.status);
 check("manifest is public", (await anon("GET", "/manifest.json")).status === 200);

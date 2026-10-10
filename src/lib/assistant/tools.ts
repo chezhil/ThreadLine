@@ -217,18 +217,20 @@ export const TOOLS = [
   tool({
     name: "ordersOverview",
     description:
-      "List of orders with status, production/QC/dispatch/payment status, buyer, quantity, price per metre and deadline. Optional filters: status (NEW, CONFIRMED, IN_PRODUCTION, QC, READY, DISPATCHED, CLOSED), dispatchStatus (NOT_DISPATCHED, PARTIALLY_DISPATCHED, FULLY_DISPATCHED), paymentStatus (UNPAID, PARTIAL, PAID).",
+      "List of orders with status, production/QC/dispatch/payment status, buyer, quantity, price per metre and deadline. Optional filters: status (NEW, CONFIRMED, IN_PRODUCTION, QC, READY, DISPATCHED, CLOSED), dispatchStatus (NOT_DISPATCHED, PARTIALLY_DISPATCHED, FULLY_DISPATCHED), paymentStatus (UNPAID, PARTIAL, PAID), overdue (true = deadline already passed and not yet dispatched/closed).",
     args: z.object({
       status: z.enum(["NEW", "CONFIRMED", "IN_PRODUCTION", "QC", "READY", "DISPATCHED", "CLOSED"]).optional(),
       dispatchStatus: z.enum(["NOT_DISPATCHED", "PARTIALLY_DISPATCHED", "FULLY_DISPATCHED"]).optional(),
       paymentStatus: z.enum(["UNPAID", "PARTIAL", "PAID"]).optional(),
+      overdue: z.boolean().optional(),
     }),
-    run: async ({ status, dispatchStatus, paymentStatus }) => {
+    run: async ({ status, dispatchStatus, paymentStatus, overdue }) => {
       const orders = await db.order.findMany({
         where: {
           ...(status ? { status } : {}),
           ...(dispatchStatus ? { dispatchStatus } : {}),
           ...(paymentStatus ? { paymentStatus } : {}),
+          ...(overdue ? { deadline: { lt: new Date() }, status: status ?? { notIn: ["DISPATCHED", "CLOSED"] } } : {}),
         },
         include: { buyer: { select: { name: true } } },
         orderBy: { deadline: "asc" },
