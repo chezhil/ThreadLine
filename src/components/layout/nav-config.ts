@@ -20,6 +20,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Accounts", href: "/accounts", roles: ["owner"] },
   { label: "Alerts", href: "/alerts", roles: ["owner", "storekeeper", "floor_supervisor", "qc_inspector"] },
   { label: "Assistant", href: "/assistant", roles: ["owner"] },
+  { label: "Audit trail", href: "/audit", roles: ["owner"] },
 ];
 
 export function navForRole(role: Role): NavItem[] {

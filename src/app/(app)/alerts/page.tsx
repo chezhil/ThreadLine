@@ -1,5 +1,5 @@
-import { ModulePlaceholder } from "@/components/layout/ModulePlaceholder";
+import { AlertsClient } from "@/components/alerts/AlertsClient";
 
-export default function Page() {
-  return <ModulePlaceholder owner="Module 4 (Devacharan)" feature="Alerts / notification centre" />;
+export default function AlertsPage() {
+  return <AlertsClient />;
 }
