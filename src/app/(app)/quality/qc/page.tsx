@@ -144,6 +144,10 @@ export default function QcQueuePage() {
       result: qcResult,
       defects: selectedDefects,
       notes: notes.trim() || null,
+      // What this client last saw before queuing — lets the server tell a
+      // stale offline replay apart from a genuine conflict with someone
+      // else's inspection (HARDENING_ADDENDUM.md item 5).
+      baseQcStatus: selectedRoll.qcStatus,
     };
 
     try {

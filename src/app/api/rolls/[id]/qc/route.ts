@@ -63,6 +63,21 @@ export async function POST(
       );
     }
 
+    // Conflict, not silent overwrite: this client queued its result against
+    // an older qcStatus (e.g. while offline) and someone else inspected the
+    // roll differently in the meantime. 409 so the offline queue can flag it
+    // for review instead of applying a stale judgement or dropping it.
+    if (data.baseQcStatus && data.baseQcStatus !== roll.qcStatus) {
+      return NextResponse.json(
+        {
+          conflict: true,
+          error: `This roll was inspected as ${roll.qcStatus} by someone else after you queued "${data.result}". Review and resubmit.`,
+          currentQcStatus: roll.qcStatus,
+        },
+        { status: 409 }
+      );
+    }
+
     const previousStatus = roll.qcStatus;
 
     // Create the QC record, update the roll, and recompute the order-level

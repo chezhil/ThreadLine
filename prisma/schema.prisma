@@ -45,6 +45,7 @@ model YarnType {
   lowStockThresholdKg Float
   costPerKg           Float
   lots                YarnLot[]
+  purchaseRequests    PurchaseRequest[]
 }
 
 model YarnLot {
@@ -105,6 +106,7 @@ model Machine {
   workOrders             WorkOrder[]
   productionLogs         ProductionLog[]
   rolls                  Roll[]
+  maintenanceRequests    MaintenanceRequest[]
 }
 
 model WorkOrder {
@@ -266,4 +268,80 @@ model AlertDelivery {
   createdAt      DateTime  @default(now())
 
   @@index([status, scheduledFor])
+}
+
+// HARDENING_ADDENDUM.md item 3: additive audit trail sitting alongside
+// Payment/Expense/Invoice, not a replacement for them — those stay the
+// source costing.ts/summary.ts compute from. Every Payment, Expense and
+// Invoice write also writes one of these in the same transaction, so "where
+// did this number come from" is "list the ledger rows for this source,"
+// without touching the (already heavily-tested) cost-allocation engine.
+model LedgerEntry {
+  id         String   @id @default(uuid())
+  date       DateTime
+  type       String   // revenue | yarn_cost | wage_cost | power_cost | overhead | payment_received | reversal
+  // Positive for an original entry, negative for a row that reverses one —
+  // so SUM(amount) nets out correctly without the reader needing to special-
+  // case reversesId. (The addendum's own sketch said "always positive"; this
+  // is the one deliberate deviation — noted in AI_NOTES.md.)
+  amount     Float
+  sourceType String   // "Invoice" | "Payment" | "Expense"
+  sourceId   String
+  orderId    String?  // denormalized for a fast per-order ledger query
+  reversesId String?  // set only on a reversing entry; original rows are never edited or deleted
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([sourceType, sourceId])
+  @@index([type, date])
+  @@index([orderId])
+}
+
+// HARDENING_ADDENDUM.md item 4: each a small PENDING -> APPROVED/REJECTED
+// state machine, raised by the role that hits the real-world trigger
+// (low stock, a machine BREAKDOWN, month-end), approved only by the owner.
+// Approving never auto-creates the downstream real-world row (a YarnLot, a
+// fixed machine) — that still happens through its own existing write path
+// when the real event (delivery, repair) actually occurs; approval here is
+// the green light, not the event itself. Approving a payout is the one
+// exception: it does create an Expense + ledger entry, because "approved"
+// *is* the real-world event for a payout (the owner releasing the money).
+model PurchaseRequest {
+  id          String    @id @default(uuid())
+  yarnTypeId  String
+  yarnType    YarnType  @relation(fields: [yarnTypeId], references: [id])
+  qtyKg       Float
+  requestedBy String
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy  String?
+  approvedAt  DateTime?
+  note        String?
+  createdAt   DateTime  @default(now())
+}
+
+model MaintenanceRequest {
+  id          String    @id @default(uuid())
+  machineId   String
+  machine     Machine   @relation(fields: [machineId], references: [id])
+  description String
+  requestedBy String
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy  String?
+  approvedAt  DateTime?
+  cost        Float?
+  createdAt   DateTime  @default(now())
+}
+
+model PayoutApproval {
+  id          String    @id @default(uuid())
+  month       String    // YYYY-MM
+  totalWages  Float
+  requestedBy String
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy  String?
+  approvedAt  DateTime?
+  expenseId   String?   // set once approval creates the payout Expense
+  createdAt   DateTime  @default(now())
+
+  @@unique([month])
 }

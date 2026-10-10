@@ -7,6 +7,7 @@ import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from 
 import { notify } from "@/lib/accounts/alerts";
 import { currentMonthKey, istDateKey, monthRange } from "@/lib/accounts/period";
 import { recomputePaymentStatus } from "@/lib/order-status";
+import { postLedgerEntry } from "@/lib/ledger";
 
 const formatINR = (n: number) =>
   n.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -132,6 +133,16 @@ export async function POST(req: NextRequest) {
       });
       const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");
+      // Ledger entry before recomputePaymentStatus — that function now sums
+      // ledger rows, so it must see this payment's entry already posted.
+      await postLedgerEntry(tx, {
+        date: at,
+        type: "payment_received",
+        amount: created.amount,
+        sourceType: "Payment",
+        sourceId: created.id,
+        orderId: invoice.orderId,
+      });
       await recomputePaymentStatus(tx, invoice.orderId);
       return created;
     });

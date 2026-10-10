@@ -7,7 +7,11 @@ export interface QueuedMutation {
   method: "POST" | "PUT" | "PATCH";
   payload: any;
   createdAt: string;
-  status: "pending" | "syncing" | "failed";
+  // "conflict": the server rejected this with 409 — someone else changed the
+  // same record differently while this client was offline. Distinct from
+  // "failed" (a validation/permission rejection) so the UI can tell "this
+  // needs a human to look at and resubmit" apart from "this was just wrong."
+  status: "pending" | "syncing" | "failed" | "conflict";
   attempts: number;
   lastError?: string;
   nextRetryAt?: string;
@@ -134,6 +138,20 @@ export async function getAllQueuedItems(): Promise<QueuedMutation[]> {
 }
 
 /**
+ * Discard one queued item without replaying it — for a "conflict" or
+ * "failed" item a human has reviewed and resolved some other way (e.g.
+ * re-did the inspection live instead). Never called automatically by
+ * replay; always an explicit user action from the queue drawer.
+ */
+export async function discardQueuedItem(id: string): Promise<void> {
+  const db = await getDB();
+  if (db) await db.delete(STORE_NAME, id);
+  else memoryStore.delete(id);
+  const count = await getPendingCount();
+  notifySubscribers(count);
+}
+
+/**
  * Compute exponential backoff with random jitter for transient server errors (500/503)
  */
 function calculateBackoffWithJitter(attempts: number): number {
@@ -197,6 +215,21 @@ export async function replayOfflineQueue(): Promise<{
           if (db) await db.delete(STORE_NAME, item.id);
           else memoryStore.delete(item.id);
           successCount++;
+        } else if (res.status === 409) {
+          // Genuine conflict (not a transient error, not "just wrong input"):
+          // flag it and stop — never silently retry a stale write, and never
+          // silently drop it either. A human resolves this from the queue
+          // drawer, same item stays until they do.
+          const errData = await res.json().catch(() => ({}));
+          const conflictItem: QueuedMutation = {
+            ...item,
+            status: "conflict",
+            attempts: item.attempts + 1,
+            lastError: errData.error || "This record changed on the server since you went offline.",
+          };
+          if (db) await db.put(STORE_NAME, conflictItem);
+          else memoryStore.set(item.id, conflictItem);
+          failureCount++;
         } else if (res.status === 500 || res.status === 503) {
           // Transient server error -> apply exponential backoff with jitter
           const attempts = item.attempts + 1;

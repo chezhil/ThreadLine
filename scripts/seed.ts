@@ -10,6 +10,7 @@ import {
   recomputeDispatchStatus,
   recomputePaymentStatus,
 } from "../src/lib/order-status";
+import { backfillLedgerEntries } from "../src/lib/ledger";
 
 const db = new PrismaClient();
 
@@ -171,6 +172,15 @@ async function main() {
   // them for real from the Roll/Invoice/Payment rows just seeded, using the
   // exact same logic the app uses on every write (src/lib/order-status.ts),
   // so demo data is internally consistent.
+  // Module 4's seed also writes Invoice/Payment rows directly via Prisma, so
+  // they never go through the ledger-posting write paths either (item 3).
+  // Backfill their LedgerEntry rows first — recomputePaymentStatus below
+  // reads the ledger, not Payment rows directly, so it would otherwise see
+  // every seeded order as UNPAID.
+  console.log("Backfilling ledger entries for seeded invoices/payments/expenses...");
+  const backfilled = await backfillLedgerEntries(db);
+  console.log(`  ${backfilled.invoices} invoice(s), ${backfilled.payments} payment(s), ${backfilled.expenses} expense(s).`);
+
   console.log("Recomputing order status fields from seeded production/QC/dispatch/payment data...");
   const allOrderIds = (await db.order.findMany({ select: { id: true } })).map((o) => o.id);
   for (const orderId of allOrderIds) {

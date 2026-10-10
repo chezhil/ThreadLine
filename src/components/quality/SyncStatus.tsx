@@ -5,6 +5,7 @@ import {
   subscribeToOfflineQueue,
   replayOfflineQueue,
   getAllQueuedItems,
+  discardQueuedItem,
   QueuedMutation,
 } from "@/lib/offline-queue";
 import { Button } from "@/components/quality/ui/Button";
@@ -61,6 +62,12 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
     const items = await getAllQueuedItems();
     setQueuedItems(items);
     setIsSyncing(false);
+  };
+
+  const handleDiscard = async (id: string) => {
+    if (!confirm("Discard this queued action? It will not be sent, and this can't be undone.")) return;
+    await discardQueuedItem(id);
+    setQueuedItems(await getAllQueuedItems());
   };
 
   const handleBackup = () => {
@@ -226,27 +233,44 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
                     <span className="font-bold text-slate-900 uppercase">{item.type}</span>
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                        item.status === "failed"
+                        item.status === "conflict"
+                          ? "bg-orange-100 text-orange-700"
+                          : item.status === "failed"
                           ? "bg-rose-100 text-rose-700"
                           : item.status === "syncing"
                           ? "bg-indigo-100 text-indigo-700"
                           : "bg-amber-100 text-amber-700"
                       }`}
                     >
-                      {item.status.toUpperCase()}
+                      {item.status === "conflict" ? "NEEDS ATTENTION" : item.status.toUpperCase()}
                     </span>
                   </div>
                   <div className="text-slate-500 font-mono text-[10px] truncate">
                     {item.method} {item.url}
                   </div>
                   {item.lastError && (
-                    <div className="text-rose-600 text-[11px] font-medium flex items-center gap-1">
+                    <div
+                      className={`text-[11px] font-medium flex items-center gap-1 ${
+                        item.status === "conflict" ? "text-orange-700" : "text-rose-600"
+                      }`}
+                    >
                       <AlertTriangle className="w-3 h-3 shrink-0" />
                       {item.lastError}
                     </div>
                   )}
-                  <div className="text-[10px] text-slate-400">
-                    Created: {new Date(item.createdAt).toLocaleTimeString()}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400">
+                      Created: {new Date(item.createdAt).toLocaleTimeString()}
+                    </span>
+                    {(item.status === "conflict" || item.status === "failed") && (
+                      <button
+                        type="button"
+                        onClick={() => handleDiscard(item.id)}
+                        className="text-[10px] font-semibold text-slate-500 underline hover:text-slate-800"
+                      >
+                        Discard
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

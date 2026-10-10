@@ -10,6 +10,7 @@ import { generateInvoiceNo } from "@/lib/order-numbers";
 import { withRetry } from "@/lib/concurrency";
 import { recomputeDispatchStatus } from "@/lib/order-status";
 import { enqueueAlert } from "@/lib/alerts/outbox";
+import { postLedgerEntry } from "@/lib/ledger";
 
 // 5% over-production allowance — rolls rarely sum to exactly qtyMetres, and
 // this mirrors the wastage tolerance costing/feasibility already use.
@@ -180,6 +181,15 @@ export async function POST(req: NextRequest) {
             },
           });
           invoiceCreated = true;
+          await postLedgerEntry(tx, {
+            date: invoice.createdAt,
+            type: "revenue",
+            // ex-GST, matching costing.ts's revenue contract (qtyMetres × pricePerMetre)
+            amount: invoice.subtotal,
+            sourceType: "Invoice",
+            sourceId: invoice.id,
+            orderId: primaryOrder.id,
+          });
         }
         const invoiceId = invoice.id;
 

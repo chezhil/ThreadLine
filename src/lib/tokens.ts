@@ -25,6 +25,9 @@ export const statusColor = {
   sent: "green",
   retrying: "amber",
   failed: "red",
+  // Approval workflow statuses (HARDENING_ADDENDUM.md item 4)
+  approved: "green",
+  rejected: "red",
 } as const;
 
 export type StatusColorKey = keyof typeof statusColor;
