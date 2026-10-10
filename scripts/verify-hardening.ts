@@ -269,10 +269,56 @@ async function main() {
 
   // ------------------------------------------------------ dispatch + outbox
   console.log("\n# Dispatch, ledger and outbox");
-  const ready = await db.order.findFirst({
+  let ready = await db.order.findFirst({
     where: { status: "READY", rolls: { some: { qcStatus: "PASS", dispatchId: null } } },
     include: { rolls: true },
   });
+  if (!ready) {
+    // The seed data has exactly one READY order with an undispatched PASS
+    // roll, and scripts/verify-integration.mjs's own dispatch check already
+    // claims it when both scripts run against the same seed in one CI job.
+    // This section is testing the dispatch API's ledger/alert side effects,
+    // not how an order becomes READY (that's scripts/verify-order-status.ts),
+    // so build a dedicated fixture instead of fighting over the shared one.
+    const buyer = await db.buyer.findFirstOrThrow({ where: { archivedAt: null } });
+    const lot = await db.yarnLot.findFirstOrThrow();
+    const loom = await db.machine.findFirstOrThrow({ where: { type: "loom" } });
+    const fx = id();
+    const order = await db.order.create({
+      data: {
+        orderNo: `VFY-${fx}`,
+        buyerId: buyer.id,
+        fabricType: "Plain",
+        colour: "White",
+        gsm: 120,
+        qtyMetres: 100,
+        pricePerMetre: 100,
+        deadline: new Date(Date.now() + 7 * 86_400_000),
+        status: "READY",
+        productionStatus: "DONE",
+        qcStatus: "PASS",
+        trackingToken: fx,
+      },
+    });
+    const workOrder = await db.workOrder.create({
+      data: { orderId: order.id, stage: "weaving", machineId: loom.id, plannedQty: 100, producedQty: 100, status: "COMPLETED" },
+    });
+    await db.roll.create({
+      data: {
+        rollNo: `VFY-ROLL-${fx}`,
+        orderId: order.id,
+        workOrderId: workOrder.id,
+        machineId: loom.id,
+        shift: "Morning (Shift A)",
+        yarnLotId: lot.id,
+        lengthMetres: 100,
+        weightKg: 20,
+        qcStatus: "PASS",
+        qrToken: `VFY-QR-${fx}`,
+      },
+    });
+    ready = await db.order.findFirst({ where: { id: order.id }, include: { rolls: true } });
+  }
   if (ready) {
     // Pass the order's remaining REWORK/PENDING rolls so the whole order ships.
     for (const r of ready.rolls.filter((r) => (r.qcStatus === "REWORK" || r.qcStatus === "PENDING") && !r.dispatchId)) {

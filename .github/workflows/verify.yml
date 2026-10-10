@@ -30,6 +30,7 @@ jobs:
       - run: npx tsx scripts/verify-costing.ts
       - run: npx tsx scripts/verify-assistant.ts
       - run: npx tsx scripts/verify-module3.ts
+      - run: npx playwright install --with-deps chromium
       - name: Start application
         run: |
           npm run start > /tmp/threadline-server.log 2>&1 &
@@ -42,3 +43,19 @@ jobs:
       - run: node scripts/verify-runtime.mjs
       - run: node scripts/verify-integration.mjs
       - run: node scripts/verify-accounts-api.mjs
+      # verify-hardening approves this month's payout, which locks that
+      # month's attendance — it must run after verify-accounts-api (or the
+      # DB must be reset between them). verify-crud tolerates either order.
+      - run: npx tsx scripts/verify-hardening.ts
+      - run: npx tsx scripts/verify-order-status.ts
+      - run: npx tsx scripts/verify-concurrency.ts
+      - run: npx tsx scripts/verify-crud.ts
+      - run: npx playwright test
+        env:
+          OWNER_PW: owner123
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
