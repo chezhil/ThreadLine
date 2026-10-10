@@ -18,7 +18,8 @@ npm run dev
 `npm run seed` seeds all four modules in order on a fresh database: Module 1
 (users, suppliers, buyers, yarn, orders), Module 2 (machines, work orders,
 production logs), Module 3 (rolls, QC, dispatches) and Module 4 (workers,
-attendance, expenses, payments). To start over: `npx prisma migrate reset`.
+attendance, expenses, payments). Running it again adds nothing. To start
+over: `npx prisma migrate reset`.
 
 Open http://localhost:3000. Seeded demo logins (see `scripts/seed.ts`):
 
@@ -40,6 +41,7 @@ Open http://localhost:3000. Seeded demo logins (see `scripts/seed.ts`):
   - `BASE=http://localhost:3000 node scripts/verify-accounts-api.mjs` — Module 4 API
   - `DATABASE_URL=file:./dev.db npx tsx scripts/verify-assistant.ts` — assistant guard rails (mock Ollama)
   - `npx tsx scripts/verify-module3.ts` — Module 3 seed sanity
+  - `BASE=http://localhost:3000 node scripts/verify-assistant-live.mjs` — assistant against a real Ollama model (prints how many answers the model wrote vs the keyword fallback)
 - AI assistant: install [Ollama](https://ollama.com) and `ollama pull llama3.1:8b`;
   without it the assistant falls back to keyword routing.
 
