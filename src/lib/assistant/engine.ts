@@ -60,7 +60,9 @@ If no tool can answer the question, reply {"tool": null, "args": {}}.`;
     { role: "user", content: question },
   ];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await ollamaChat(messages, { json: true });
+    // A plan is a few dozen tokens. The cap stops a model that loops in JSON
+    // mode (seen with very small models) from holding the request until timeout.
+    const raw = await ollamaChat(messages, { json: true, maxTokens: 256 });
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -242,7 +244,7 @@ Rules:
 - At most 4 short sentences. No markdown tables.`,
         },
         { role: "user", content: `Question: ${question}\n\nDATA:\n${JSON.stringify(data)}` },
-      ])
+      ], { maxTokens: 400 }) // at most 4 short sentences
     ).trim();
   } catch (e) {
     if (!(e instanceof OllamaUnavailableError)) throw e;

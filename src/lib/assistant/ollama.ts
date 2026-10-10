@@ -12,7 +12,9 @@ export interface ChatMessage {
 
 export class OllamaUnavailableError extends Error {}
 
-export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean } = {}): Promise<string> {
+/** `maxTokens` caps the reply length; leave it unset for calls whose output
+ * can legitimately be long. */
+export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number } = {}): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
@@ -25,7 +27,7 @@ export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean
         messages,
         stream: false,
         ...(opts.json ? { format: "json" } : {}),
-        options: { temperature: 0 },
+        options: { temperature: 0, ...(opts.maxTokens ? { num_predict: opts.maxTokens } : {}) },
       }),
       signal: controller.signal,
     });
