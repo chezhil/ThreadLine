@@ -21,6 +21,13 @@ export const statusColor = {
   unpaid: "red",
   partial: "amber",
   paid: "green",
+  // AlertDelivery outbox statuses (src/lib/alerts/outbox.ts)
+  sent: "green",
+  retrying: "amber",
+  failed: "red",
+  // Approval workflow statuses (HARDENING_ADDENDUM.md item 4)
+  approved: "green",
+  rejected: "red",
 } as const;
 
 export type StatusColorKey = keyof typeof statusColor;

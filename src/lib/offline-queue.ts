@@ -7,7 +7,11 @@ export interface QueuedMutation {
   method: "POST" | "PUT" | "PATCH";
   payload: Record<string, unknown>;
   createdAt: string;
-  status: "pending" | "syncing" | "failed";
+  // "conflict": the server rejected this with 409 — someone else changed the
+  // same record differently while this client was offline. Distinct from
+  // "failed" (a validation/permission rejection) so the UI can tell "this
+  // needs a human to look at and resubmit" apart from "this was just wrong."
+  status: "pending" | "syncing" | "failed" | "conflict";
   attempts: number;
   // The signed-in user who queued it. Only that user's session replays it,
   // so a shared tablet never posts one person's inspections under another's
@@ -166,9 +170,10 @@ export async function getPendingCount(): Promise<number> {
   return (await readAll()).filter((i) => mine(i) && (i.status === "pending" || i.status === "syncing")).length;
 }
 
-/** Count of the current user's items the server rejected. */
+/** Count of the current user's items the server rejected or flagged as a
+ * conflict — both need a person to look at them. */
 export async function getFailedCount(): Promise<number> {
-  return (await readAll()).filter((i) => mine(i) && i.status === "failed").length;
+  return (await readAll()).filter((i) => mine(i) && (i.status === "failed" || i.status === "conflict")).length;
 }
 
 /** The current user's queued items, oldest first. */
@@ -176,15 +181,18 @@ export async function getAllQueuedItems(): Promise<QueuedMutation[]> {
   return (await readAll()).filter(mine).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** Put a failed item back in line. */
+/** Put a failed item back in line. A "conflict" item is never retried: the
+ * newer inspection on the server wins, and the person re-inspects live. */
 export async function retryQueuedItem(id: string) {
   const item = (await readAll()).find((i) => i.id === id);
-  if (!item) return;
+  if (!item || item.status === "conflict") return;
   await putItem({ ...item, status: "pending", nextRetryAt: undefined, lastError: undefined });
   await notifySubscribers();
 }
 
-/** Drop an item the user decided not to send. */
+/** Drop an item without replaying it — a "failed" or "conflict" item a
+ * person reviewed and resolved some other way (e.g. re-did the inspection
+ * live). Never called by replay itself; always an explicit user action. */
 export async function discardQueuedItem(id: string) {
   await deleteItem(id);
   await notifySubscribers();
@@ -261,6 +269,22 @@ export async function replayOfflineQueue(): Promise<{
           });
           failureCount++;
           break;
+        } else if (res.status === 409) {
+          // Genuine conflict (not transient, not just wrong input): someone
+          // changed the same record differently while this client was
+          // offline. Never retried automatically and never dropped silently —
+          // the item waits in the queue drawer until a person discards it
+          // (or re-does the work live). Later items are independent, so the
+          // replay carries on.
+          const errData = (await res.json().catch(() => ({}))) as { error?: string };
+          await putItem({
+            ...item,
+            status: "conflict",
+            attempts: item.attempts + 1,
+            needsSignIn: false,
+            lastError: errData.error || "This record changed on the server since you went offline.",
+          });
+          failureCount++;
         } else if (TRANSIENT.has(res.status)) {
           const attempts = item.attempts + 1;
           const delayMs = calculateBackoffWithJitter(attempts);

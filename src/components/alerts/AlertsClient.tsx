@@ -15,6 +15,19 @@ import {
 } from "@/lib/accounts/alert-format";
 import { ErrorNote, Loading, PageTitle } from "@/components/accounts/Stat";
 
+interface AlertDeliveryRow {
+  id: string;
+  channel: string;
+  recipient: string;
+  templateName: string | null;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
 export function AlertsClient() {
   const [show, setShow] = useState("unread");
   const [severity, setSeverity] = useState("");
@@ -24,6 +37,23 @@ export function AlertsClient() {
   const url = `/api/alerts?limit=200${show === "unread" ? "&unread=1" : ""}${severity ? `&severity=${severity}` : ""}`;
   const { data, loading, error, refetch } = useApi<{ notifications: NotificationRow[]; unreadCount: number; total: number }>(url);
   useRealtimeEvent(RealtimeEvents.NotificationNew, () => refetch());
+
+  // Owner-only — the API 403s for every other role, in which case this
+  // panel just stays hidden rather than showing an error.
+  const { data: outbox, error: outboxError, refetch: refetchOutbox } = useApi<{
+    deliveries: AlertDeliveryRow[];
+    pendingCount: number;
+  }>("/api/alerts/outbox?limit=20");
+  const [processing, setProcessing] = useState(false);
+  async function processOutbox() {
+    setProcessing(true);
+    try {
+      await postJson("/api/alerts/outbox/process", {});
+      refetchOutbox();
+    } finally {
+      setProcessing(false);
+    }
+  }
 
   const all = useMemo(() => data?.notifications ?? [], [data]);
   const kinds = useMemo(() => [...new Set(all.map((n) => alertKind(n.type)))].sort(), [all]);
@@ -136,6 +166,47 @@ export function AlertsClient() {
               <p className="text-sm text-gray-500">Select an alert to preview the message.</p>
             )}
           </Card>
+
+          {outbox && !outboxError && (
+            <Card className="h-fit">
+              <CardHeader
+                title="Delivery outbox"
+                action={
+                  <Button size="sm" variant="secondary" onClick={processOutbox} disabled={processing}>
+                    {processing ? "Processing…" : "Process now"}
+                  </Button>
+                }
+              />
+              <p className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-800">
+                {outbox.pendingCount > 0
+                  ? `${outbox.pendingCount} queued for delivery.`
+                  : "Nothing queued."}{" "}
+                Simulated send — no real WhatsApp/SMS/email provider is connected yet; this proves the
+                queue-and-retry shape, not a live channel.
+              </p>
+              {outbox.deliveries.length === 0 ? (
+                <p className="text-sm text-gray-500">No buyer alerts queued yet — these appear when an order becomes ready or is dispatched.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {outbox.deliveries.map((d) => (
+                    <div key={d.id} className="rounded-md border border-border px-2 py-1.5 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full border px-2 py-0.5 font-medium ${statusBadgeClass(d.status)}`}>{d.status}</span>
+                        <span className="font-medium text-foreground">{d.templateName ?? d.channel}</span>
+                        <span className="text-gray-400">→ {d.recipient}</span>
+                        <span className="ml-auto text-gray-400">{formatAlertTime(d.createdAt)}</span>
+                      </div>
+                      {d.lastError && (
+                        <p className="mt-1 text-red-700">
+                          {d.attempts}/{d.maxAttempts} attempts — {d.lastError}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
         </div>
       )}
     </div>

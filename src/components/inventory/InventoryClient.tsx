@@ -5,6 +5,12 @@ import { useApi, postJson } from "@/lib/useApi";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
 
+interface PurchaseRequestRow {
+  id: string;
+  yarnTypeId: string;
+  status: string;
+}
+
 interface YarnLot {
   id: string;
   lotNo: string;
@@ -47,6 +53,19 @@ export function InventoryClient() {
   const yarnTypes = useApi<{ yarnTypes: YarnType[] }>("/api/yarn-types");
   const suppliers = useApi<{ suppliers: Supplier[] }>("/api/suppliers");
   const lowStock = useApi<{ lowStock: LowStockItem[] }>("/api/yarn/low-stock");
+  const purchaseRequests = useApi<{ requests: PurchaseRequestRow[] }>("/api/purchase-requests");
+  const [requesting, setRequesting] = useState<string | null>(null);
+
+  async function requestMore(item: LowStockItem) {
+    const suggestedKg = Math.max(1, Math.round((item.lowStockThresholdKg - item.remainingKg) * 2));
+    setRequesting(item.yarnTypeId);
+    await postJson("/api/purchase-requests", { yarnTypeId: item.yarnTypeId, qtyKg: suggestedKg });
+    setRequesting(null);
+    purchaseRequests.refetch();
+  }
+
+  const pendingRequestFor = (yarnTypeId: string) =>
+    purchaseRequests.data?.requests.find((r) => r.yarnTypeId === yarnTypeId && r.status === "PENDING");
 
   useRealtimeEvent(RealtimeEvents.StockChanged, () => {
     yarnTypes.refetch();
@@ -69,13 +88,25 @@ export function InventoryClient() {
       {lowStock.data && lowStock.data.lowStock.length > 0 && (
         <Card className="border-amber-300 bg-amber-50">
           <CardHeader title="Low stock" />
-          <ul className="flex flex-col gap-1 text-sm text-amber-800">
-            {lowStock.data.lowStock.map((item) => (
-              <li key={item.yarnTypeId}>
-                {item.name} ({item.colour}): {item.remainingKg.toFixed(1)}kg left — threshold{" "}
-                {item.lowStockThresholdKg}kg
-              </li>
-            ))}
+          <ul className="flex flex-col gap-2 text-sm text-amber-800">
+            {lowStock.data.lowStock.map((item) => {
+              const pending = pendingRequestFor(item.yarnTypeId);
+              return (
+                <li key={item.yarnTypeId} className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    {item.name} ({item.colour}): {item.remainingKg.toFixed(1)}kg left — threshold{" "}
+                    {item.lowStockThresholdKg}kg
+                  </span>
+                  {pending ? (
+                    <Badge status="pending" />
+                  ) : (
+                    <Button size="sm" variant="secondary" disabled={requesting === item.yarnTypeId} onClick={() => requestMore(item)}>
+                      {requesting === item.yarnTypeId ? "Requesting…" : "Request more"}
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </Card>
       )}

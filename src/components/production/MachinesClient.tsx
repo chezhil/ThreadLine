@@ -100,13 +100,26 @@ function MachineCard({ machine, onStatus, onChanged }: { machine: FloorMachine; 
     onChanged();
   }
 
+  async function requestMaintenance() {
+    const description = window.prompt(`Describe the problem with ${machine.name}:`);
+    if (!description) return;
+    const result = await writeApi("/api/maintenance-requests", "POST", { machineId: machine.id, description });
+    if (!result.ok) { setError(Object.values(result.fieldErrors).flat().join(" ") || result.error); return; }
+    setError("");
+    window.alert("Maintenance request raised. The owner will review it in Approvals.");
+  }
+
   return <article className="production-panel production-status" data-status={machine.status}>
     <strong>{machine.name}</strong> <span className="production-muted">{machine.type}</span>
     <p>{machine.capacityMetresPerShift} m / shift · {machine.todayMetres} m today</p>
     {machine.currentWorkOrder && <p>Current order: {machine.currentWorkOrder.order.orderNo}</p>}
     <label>Status <select value={machine.status} onChange={(event) => onStatus(machine.id, event.target.value)}>{statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
     {error && <p role="alert" className="production-error">{error}</p>}
-    <div className="production-actions"><button type="button" onClick={() => setEditing(!editing)}>{editing ? "Cancel edit" : "Edit"}</button><button type="button" onClick={remove}>Remove</button></div>
+    <div className="production-actions">
+      <button type="button" onClick={() => setEditing(!editing)}>{editing ? "Cancel edit" : "Edit"}</button>
+      <button type="button" onClick={remove}>Remove</button>
+      {machine.status === "BREAKDOWN" && <button type="button" onClick={requestMaintenance}>Request maintenance</button>}
+    </div>
     {editing && <form className="production-form" onSubmit={save} noValidate>
       <label>Name<input name="name" defaultValue={machine.name} required /></label>
       {errors.name && <small className="production-error">{errors.name[0]}</small>}

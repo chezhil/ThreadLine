@@ -69,11 +69,6 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
     await refreshQueue();
   };
 
-  const handleDiscard = async (id: string) => {
-    await discardQueuedItem(id);
-    await refreshQueue();
-  };
-
   const handleOpenQueue = async () => {
     const items = await getAllQueuedItems();
     setQueuedItems(items);
@@ -86,6 +81,12 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
     const items = await getAllQueuedItems();
     setQueuedItems(items);
     setIsSyncing(false);
+  };
+
+  const handleDiscard = async (id: string) => {
+    if (!confirm("Discard this queued action? It will not be sent, and this can't be undone.")) return;
+    await discardQueuedItem(id);
+    await refreshQueue();
   };
 
   const handleBackup = () => {
@@ -260,21 +261,27 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
                     <span className="font-bold text-slate-900 uppercase">{item.type}</span>
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                        item.status === "failed"
+                        item.status === "conflict"
+                          ? "bg-orange-100 text-orange-700"
+                          : item.status === "failed"
                           ? "bg-rose-100 text-rose-700"
                           : item.status === "syncing"
                           ? "bg-indigo-100 text-indigo-700"
                           : "bg-amber-100 text-amber-700"
                       }`}
                     >
-                      {item.status.toUpperCase()}
+                      {item.status === "conflict" ? "NEEDS ATTENTION" : item.status.toUpperCase()}
                     </span>
                   </div>
                   <div className="text-slate-500 font-mono text-[10px] truncate">
                     {item.method} {item.url}
                   </div>
                   {item.lastError && (
-                    <div className="text-rose-600 text-[11px] font-medium flex items-center gap-1">
+                    <div
+                      className={`text-[11px] font-medium flex items-center gap-1 ${
+                        item.status === "conflict" ? "text-orange-700" : "text-rose-600"
+                      }`}
+                    >
                       <AlertTriangle className="w-3 h-3 shrink-0" />
                       {item.lastError}
                     </div>
@@ -283,11 +290,13 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
                     <span className="text-[10px] text-slate-400">
                       Created: {new Date(item.createdAt).toLocaleString()}
                     </span>
-                    {item.status === "failed" && (
+                    {(item.status === "failed" || item.status === "conflict") && (
                       <span className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleRetry(item.id)} disabled={!isOnline}>
-                          Retry
-                        </Button>
+                        {item.status === "failed" && (
+                          <Button variant="ghost" size="sm" onClick={() => handleRetry(item.id)} disabled={!isOnline}>
+                            Retry
+                          </Button>
+                        )}
                         <Button variant="ghost" size="sm" onClick={() => handleDiscard(item.id)}>
                           Discard
                         </Button>

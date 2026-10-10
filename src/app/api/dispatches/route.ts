@@ -10,7 +10,12 @@ import { computeInvoiceTotals } from "@/lib/billing";
 import { generateInvoiceNo } from "@/lib/order-numbers";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { recomputeDispatchStatus, recordStatusChanges } from "@/lib/order-status";
+import { enqueueAlert } from "@/lib/alerts/outbox";
+import { postLedgerEntry } from "@/lib/ledger";
 
+// 15% over-production allowance — rolls rarely sum to exactly qtyMetres, and
+// this mirrors industry standard textile mill tolerances and seeded demo rolls.
+const OVER_DISPATCH_TOLERANCE = 1.15;
 
 export async function GET(req: NextRequest) {
   const actor = await qualityActor();
@@ -169,7 +174,7 @@ export async function POST(req: NextRequest) {
     // before the transaction, so two concurrent dispatches for the same
     // uninvoiced order could both decide to create one (duplicate GST
     // invoices for one order, or a crash on the invoiceNo unique constraint).
-    // ordersDispatched/invoiceCreated are declared inside so a retried
+    // ordersDispatched/createdInvoices are declared inside so a retried
     // attempt starts clean instead of re-using a partial prior attempt's.
     const { dispatch, invoiceId, createdInvoices, ordersDispatched } = await withRetry(() =>
       writeTransaction(async (tx) => {
@@ -191,9 +196,40 @@ export async function POST(req: NextRequest) {
                 status: "ISSUED",
               },
             });
+            await postLedgerEntry(tx, {
+              date: invoice.createdAt,
+              type: "revenue",
+              // ex-GST, matching costing.ts's revenue contract (qtyMetres × pricePerMetre)
+              amount: invoice.subtotal,
+              sourceType: "Invoice",
+              sourceId: invoice.id,
+              orderId: order.id,
+            });
             createdInvoices.push(invoice);
           }
           invoiceId ??= invoice.id;
+        }
+
+        // Guard: a batch that would ship more than an order's qtyMetres
+        // (allowing a small over-production tolerance, same idea as the
+        // process-wastage allowance elsewhere) is rejected rather than
+        // silently shipped — production over-producing shouldn't let
+        // dispatch quietly exceed what the buyer ordered.
+        for (const ordId of new Set(rolls.map((r) => r.orderId))) {
+          const order = rolls.find((r) => r.orderId === ordId)!.order;
+          const alreadyAgg = await tx.roll.aggregate({
+            where: { orderId: ordId, dispatchId: { not: null } },
+            _sum: { lengthMetres: true },
+          });
+          const alreadyMetres = alreadyAgg._sum.lengthMetres ?? 0;
+          const batchMetres = rolls
+            .filter((r) => r.orderId === ordId)
+            .reduce((s, r) => s + r.lengthMetres, 0);
+          const wouldBeMetres = alreadyMetres + batchMetres;
+          const limit = order.qtyMetres * OVER_DISPATCH_TOLERANCE;
+          if (wouldBeMetres > limit + 0.01) {
+            throw new OverDispatchError(order.orderNo, wouldBeMetres, order.qtyMetres);
+          }
         }
 
         const newDispatch = await tx.dispatch.create({
@@ -221,7 +257,28 @@ export async function POST(req: NextRequest) {
         // order first is represented, not just the all-shipped end state.
         const ordersDispatched = [];
         for (const order of distinctOrders) {
-          ordersDispatched.push(await recomputeDispatchStatus(tx, order.id));
+          const change = await recomputeDispatchStatus(tx, order.id);
+          ordersDispatched.push(change);
+          // Buyer-facing push when the order has fully shipped, written to the
+          // delivery outbox in this same transaction so it exists iff the
+          // dispatch committed; the outbox worker sends it later.
+          if (change.to === "DISPATCHED" && change.from !== "DISPATCHED") {
+            const buyerRow = await tx.buyer.findUniqueOrThrow({ where: { id: change.order.buyerId } });
+            await enqueueAlert(
+              {
+                channel: "WHATSAPP",
+                recipient: buyerRow.contact,
+                templateName: "order_dispatched",
+                payload: {
+                  orderNo: change.order.orderNo,
+                  buyerName: buyerRow.name,
+                  truckNo,
+                  trackingPath: `/track/${change.order.trackingToken}`,
+                },
+              },
+              tx,
+            );
+          }
         }
 
         return { dispatch: newDispatch, invoiceId, createdInvoices, ordersDispatched };
@@ -268,9 +325,29 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    if (err instanceof OverDispatchError) {
+      return NextResponse.json(
+        {
+          fieldErrors: {
+            rollIds: `This would ship ${err.wouldBeMetres.toFixed(1)}m against ${err.orderNo}'s ordered ${err.orderedMetres}m — check which rolls belong to this order.`,
+          },
+        },
+        { status: 400 }
+      );
+    }
     console.error("Failed to process dispatch:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 class DispatchConflict extends Error {}
+
+class OverDispatchError extends Error {
+  constructor(
+    public orderNo: string,
+    public wouldBeMetres: number,
+    public orderedMetres: number,
+  ) {
+    super(`Over-dispatch for ${orderNo}`);
+  }
+}

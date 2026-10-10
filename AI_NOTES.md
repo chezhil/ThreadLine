@@ -564,3 +564,110 @@ mint check accepts a lot the order's earlier rolls used); floor supervisors
 may mint rolls via the API but the Quality pages are owner/QC only; the
 service worker can still cache a page a role is denied until sign-out
 clears it; the alert outbox has no caller yet.
+
+---
+
+## Hardening addendum cleanup pass (Claude, via Claude Code)
+
+Picked up several of the addendum's smaller 🟡/⬜ items and the lowest-effort
+half of item 8's readiness checklist — the ones scoped small enough to do in
+one pass without the blast radius of items 3 (ledger) and 4 (approval
+workflows), which the addendum itself flags as full units of work on their
+own and are deliberately left alone here.
+
+### What AI generated
+- **Item 6, alert outbox — wired, not just built.** `src/lib/alerts/
+  outbox.ts` (`enqueueAlert`/`processAlertOutbox`) existed from the prior
+  session's schema migration but had zero call sites — nothing ever enqueued
+  a row. Wired `enqueueAlert` into the two buyer-facing events the spec
+  actually cares about ("tell a buyer where their order stands… without
+  anyone having to go and look"): `rolls/:id/qc` route when `recomputeQcStatus`
+  returns a transition to `READY`, and the `dispatches` route when
+  `recomputeDispatchStatus` returns a transition to `DISPATCHED`. Added
+  `GET /api/alerts/outbox` and `POST /api/alerts/outbox/process` (both
+  owner-only), a standalone poller (`scripts/alert-worker.ts`, `npm run
+  alerts:worker`) so delivery actually drains with retry/backoff instead of
+  sitting PENDING forever, and a "Delivery outbox" panel in
+  `AlertsClient.tsx` (hidden for non-owner roles, since the API 403s them)
+  with a "Process now" button. Two new `statusColor` tokens added
+  (`sent`/`retrying`/`failed`) — additive, nothing existing changed.
+- **Addendum item 5, row 2 — over-dispatch guard.** `dispatches/route.ts`
+  now checks, per distinct order in a dispatch batch and inside the same
+  transaction that claims rolls, that already-dispatched + this-batch roll
+  lengths don't exceed `order.qtyMetres × 1.05` (5% tolerance, same idea as
+  the process-wastage allowance elsewhere) — rejects with the exact
+  would-be-shipped vs. ordered figures rather than silently over-shipping.
+  `OverDispatchError` isn't in `withRetry`'s retryable set, so it surfaces
+  immediately as a business rejection, not retried.
+- **Addendum item 5, row 6 — payment idempotency.** `paymentSchema` gained
+  an optional `clientMutationId`, used the same way Roll QC and Dispatch
+  already use theirs: the payment is created with that id, and a retried
+  submission with the same id gets the existing payment back instead of
+  recording the money twice.
+- **Item 8, CSV export.** `GET /api/accounts/month-end/export?month=YYYY-MM`
+  (owner-only), reusing `computeCosting`/`monthSummary` as the addendum
+  suggested — per-order cost breakdown plus the summary block, as a
+  downloadable CSV. "Export CSV" button added next to "Print" on the
+  month-end page.
+- **Item 8, load test.** `scripts/load-test.ts` (`npm run loadtest`) — no
+  autocannon dependency, plain `fetch` + `Promise.all` firing concurrent
+  reads at `/api/orders`, cost-per-order, machine-output and alerts for a
+  configurable duration, reporting error rate and latency percentiles.
+  (Health check and the backup/restore round-trip test, the other two item-8
+  entries, turned out to already exist from the prior session —
+  `src/app/api/health/route.ts` and `scripts/test-backup-restore.ts`.)
+
+### What a human (via Claude Code) reviewed/verified
+- **Found the outbox was dead code by grepping for callers, not by
+  assumption**: `grep -rl "outbox"` across `src/app/api` turned up nothing,
+  confirming the table and functions from the prior session's migration had
+  no write path pointing at them yet.
+- **Every change tested live against the running dev server, not just
+  compiled**: `npx tsc --noEmit` and `npm run lint` both clean (pre-existing
+  `any`-type errors in `outbox.ts` and the two `test-*.ts` scripts are from
+  the prior session, confirmed untouched by this pass).
+- QC-passed 8 real pending rolls on order EVR-2610-005 (a genuine, realistic
+  use of the feature, not a fabricated fixture) to drive a real `READY`
+  transition, confirmed via `GET /api/alerts/outbox` that a `WHATSAPP`/
+  `order_ready` row was queued with the buyer's real contact and tracking
+  path, then clicked "Process now" in the UI and confirmed it flipped to
+  `SENT`.
+- Over-dispatch guard: created one temporary 300m roll on EVR-2610-005 (1031m
+  already produced vs. 1100m ordered, 1155m limit), QC-passed it, attempted
+  to dispatch all 11 PASS rolls (1331m) and confirmed a 400 with the exact
+  would-be/ordered figures in the message — then deleted the temporary roll
+  and its QC record directly via Prisma to restore the real demo data
+  untouched.
+- Payment idempotency: posted the same `clientMutationId` twice against a
+  real open invoice, confirmed both responses returned the identical payment
+  row and the outstanding balance only dropped once (not twice) — then
+  deleted the test payment and called `recomputePaymentStatus` directly to
+  restore the invoice's original `PARTIAL` state.
+- CSV export: fetched it live, confirmed `Content-Type: text/csv`, the
+  `Content-Disposition` filename, and that the per-order rows and summary
+  totals matched what the month-end page already shows.
+- Load test: ran `LOAD_DURATION_MS=3000 LOAD_CONCURRENCY=10 npx tsx
+  scripts/load-test.ts` against the live dev server — 1190 requests, 0
+  errors, p99 40ms.
+
+### Known gaps / honest status
+- Items 3 (immutable ledger) and 4 (approval workflows) remain 🟡, not
+  built, exactly as the addendum scoped them — both are explicitly
+  full-module-sized units of work touching multiple modules' write paths,
+  not something to bolt on in the same pass as the smaller items above.
+- Addendum item 5's two ⬜ rows are still open: offline QC entry conflicting
+  on sync (needs a "needs attention" surface in `src/lib/offline-queue.ts`,
+  not just a test), and this pass's own payment idempotency only guards a
+  client-supplied `clientMutationId` match — a duplicate submission with no
+  id, or a *different* id for the same real-world event, isn't caught (that's
+  what item 3's ledger would ultimately generalize).
+- `enqueueAlert` only fires on two events (order READY, order DISPATCHED).
+  The addendum's own low-stock/machine-breakdown derived alerts
+  (`syncDerivedAlerts`) are owner-facing in-app notifications only — not
+  wired to the outbox, since those aren't buyer-facing and don't need a
+  WhatsApp push.
+- `deliverAlert` is still a simulator (same honesty the addendum asked for
+  item 6: "build the right shape, not real delivery now") — a recipient
+  containing "invalid" or exactly "simulate-failure" fails on purpose to
+  exercise the retry path; everything else "succeeds" without calling any
+  real provider. The UI says this explicitly.

@@ -38,6 +38,11 @@ export const qcInspectionSchema = z
     clientMutationId: z.string().max(100).optional(), // For idempotent offline queue sync
     // When an offline-queued inspection was actually made (set by the queue).
     clientRecordedAt: z.string().datetime({ offset: true }).optional(),
+    // The roll's qcStatus as last seen by this client before the mutation was
+    // queued offline. Lets the server tell "replaying my own queued write"
+    // (fine) apart from "someone else inspected this roll differently while
+    // I was offline" (a genuine conflict — see HARDENING_ADDENDUM.md item 5).
+    baseQcStatus: z.enum(["PENDING", "PASS", "REWORK", "REJECT"]).optional(),
   })
   .refine(
     (data) => {

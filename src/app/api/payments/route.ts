@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { writeTransaction } from "@/lib/concurrency";
 import { requireRole } from "@/lib/auth";
@@ -9,6 +10,7 @@ import { notify } from "@/lib/accounts/alerts";
 import { currentMonthKey, istDateKey, monthRange } from "@/lib/accounts/period";
 import { recomputePaymentStatus } from "@/lib/order-status";
 import { emit, RealtimeEvents } from "@/lib/realtime";
+import { postLedgerEntry } from "@/lib/ledger";
 
 const formatINR = (n: number) =>
   n.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -75,13 +77,39 @@ export async function GET(req: NextRequest) {
   });
 }
 
+type PaymentWithInvoice = Prisma.PaymentGetPayload<{
+  include: { invoice: { include: { payments: { select: { amount: true } } } } };
+}>;
+
+/** The answer to a repeated clientMutationId: the payment already recorded,
+ * or 409 when that id was used for a different invoice. */
+function replayedPayment(existing: PaymentWithInvoice, invoiceId: string) {
+  if (existing.invoiceId !== invoiceId) {
+    return NextResponse.json({ error: "This payment id was already used for another invoice" }, { status: 409 });
+  }
+  const paidSoFar = existing.invoice.payments.reduce((s, p) => s + p.amount, 0);
+  const { invoice: _invoice, ...payment } = existing;
+  return NextResponse.json({ payment, outstanding: round2(existing.invoice.total - paidSoFar) }, { status: 200 });
+}
+
 export async function POST(req: NextRequest) {
   const user = await requireRole("owner");
   if (!user) return forbidden();
 
   const parsed = paymentSchema.safeParse(await readJson(req));
   if (!parsed.success) return fieldErrorResponse(zodFieldErrors(parsed.error));
-  const { invoiceId, amount, mode, receivedAt } = parsed.data;
+  const { invoiceId, amount, mode, receivedAt, clientMutationId } = parsed.data;
+
+  // Idempotency: a double-click or a retried offline-queue submission with
+  // the same clientMutationId returns the payment already recorded instead
+  // of recording the same money twice.
+  if (clientMutationId) {
+    const existing = await db.payment.findUnique({
+      where: { id: clientMutationId },
+      include: { invoice: { include: { payments: { select: { amount: true } } } } },
+    });
+    if (existing) return replayedPayment(existing, invoiceId);
+  }
 
   const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
@@ -112,13 +140,34 @@ export async function POST(req: NextRequest) {
   let saved;
   try {
     saved = await writeTransaction(async (tx) => {
-      const created = await tx.payment.create({ data: { invoiceId, amount, mode, receivedAt: at } });
+      const created = await tx.payment.create({
+        data: { id: clientMutationId || undefined, invoiceId, amount, mode, receivedAt: at },
+      });
       const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");
+      // Ledger entry before recomputePaymentStatus — that function sums
+      // ledger rows, so it must see this payment's entry already posted.
+      await postLedgerEntry(tx, {
+        date: at,
+        type: "payment_received",
+        amount: created.amount,
+        sourceType: "Payment",
+        sourceId: created.id,
+        orderId: invoice.orderId,
+      });
       const paymentStatus = await recomputePaymentStatus(tx, invoice.orderId);
       return { created, paymentStatus };
     });
   } catch (e) {
+    // The same clientMutationId sent twice at once: the second insert loses
+    // the primary-key race. Answer with the payment the first one recorded.
+    if (clientMutationId && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      const existing = await db.payment.findUnique({
+        where: { id: clientMutationId },
+        include: { invoice: { include: { payments: { select: { amount: true } } } } },
+      });
+      if (existing) return replayedPayment(existing, invoiceId);
+    }
     if (e instanceof Error && e.message === "OVERPAID") {
       return fieldErrorResponse({ amount: ["Another payment was just recorded on this invoice; refresh and check the balance"] }, 409);
     }

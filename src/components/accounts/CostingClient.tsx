@@ -236,6 +236,8 @@ function OrderBreakdown({ orderId }: { orderId: string }) {
         </ul>
       </Card>
 
+      <LedgerCard orderId={o.orderId} />
+
       {o.dataGaps.length > 0 && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           <p className="font-medium">Data gaps</p>
@@ -264,5 +266,60 @@ function OrderBreakdown({ orderId }: { orderId: string }) {
         />
       </div>
     </div>
+  );
+}
+
+const LEDGER_TYPE_LABEL: Record<string, string> = {
+  revenue: "Revenue",
+  yarn_cost: "Yarn cost",
+  wage_cost: "Wage cost",
+  power_cost: "Power cost",
+  overhead: "Overhead",
+  payment_received: "Payment received",
+  reversal: "Reversal",
+};
+
+interface LedgerEntryRow {
+  id: string;
+  date: string;
+  type: string;
+  amount: number;
+  sourceType: string;
+  sourceId: string;
+  reversesId: string | null;
+  note: string | null;
+}
+
+/** HARDENING_ADDENDUM.md item 3's stated payoff: "show me where this number
+ * came from" is a list of ledger rows, not a re-explained query. Additive —
+ * the cost breakdown above is still computed from costing.ts, unchanged;
+ * this is the parallel audit trail sitting alongside it. */
+function LedgerCard({ orderId }: { orderId: string }) {
+  const { data, loading, error } = useApi<{ entries: LedgerEntryRow[]; netByType: Record<string, number> }>(
+    `/api/ledger?orderId=${encodeURIComponent(orderId)}`,
+  );
+  return (
+    <Card>
+      <CardHeader title="Ledger" />
+      {loading && <p className="text-sm text-gray-500">Loading…</p>}
+      {error && <ErrorNote message={`Couldn't load the ledger: ${error}`} />}
+      {data && data.entries.length === 0 && (
+        <EmptyState title="No ledger entries yet" description="Entries are posted when an invoice is raised, a payment arrives, or an expense is linked to this order." />
+      )}
+      {data && data.entries.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {data.entries.map((e) => (
+            <div key={e.id} className="flex items-center justify-between border-b border-border py-1 text-sm last:border-0">
+              <div>
+                <span className="font-medium text-foreground">{LEDGER_TYPE_LABEL[e.type] ?? e.type}</span>
+                {e.reversesId && <span className="ml-1 text-xs text-amber-700">(reversal)</span>}
+                <span className="ml-2 text-xs text-gray-400">{dateIN(e.date)} · {e.sourceType}</span>
+              </div>
+              <span className={`tabular-nums ${e.amount < 0 ? "text-red-700" : "text-foreground"}`}>{inr(e.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

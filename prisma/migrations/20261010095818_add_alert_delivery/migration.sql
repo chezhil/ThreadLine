@@ -17,4 +17,3 @@ CREATE TABLE "AlertDelivery" (
 
 -- CreateIndex
 CREATE INDEX "AlertDelivery_status_scheduledFor_idx" ON "AlertDelivery"("status", "scheduledFor");
-

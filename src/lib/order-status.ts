@@ -189,20 +189,26 @@ export async function recomputeRollAggregates(tx: Db, orderId: string): Promise<
   return netChange([a, b]);
 }
 
-/** Recomputes payment status from the sum of Payment rows across all of this
- * order's Invoice rows vs. their combined total. Independent of `status` —
- * an order can be fully DISPATCHED and still UNPAID. */
+/** Recomputes payment status from each Invoice's GST-inclusive total (still
+ * read off Invoice — that's invoice metadata, not a money-flow fact the
+ * ledger classifies) vs. the ledger's `payment_received` entries for this
+ * order (HARDENING_ADDENDUM.md item 3: one source of truth for how much has
+ * actually been paid). A reversed payment keeps the same type with a negated
+ * amount, so the sum nets out without special-casing reversesId.
+ * Independent of `status` — an order can be fully DISPATCHED and still
+ * UNPAID. Returns the change so the caller can audit/broadcast it. */
 export async function recomputePaymentStatus(
   tx: Db,
   orderId: string,
 ): Promise<{ from: PaymentStatus; to: PaymentStatus }> {
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { paymentStatus: true } });
-  const invoices = await tx.invoice.findMany({
-    where: { orderId },
-    include: { payments: { select: { amount: true } } },
-  });
+  const invoices = await tx.invoice.findMany({ where: { orderId }, select: { total: true } });
   const totalInvoiced = invoices.reduce((s, i) => s + i.total, 0);
-  const totalPaid = invoices.reduce((s, i) => s + i.payments.reduce((p, pay) => p + pay.amount, 0), 0);
+  const paidAgg = await tx.ledgerEntry.aggregate({
+    where: { orderId, type: "payment_received" },
+    _sum: { amount: true },
+  });
+  const totalPaid = paidAgg._sum.amount ?? 0;
   let paymentStatus: PaymentStatus;
   if (totalInvoiced === 0 || totalPaid <= 0) paymentStatus = "UNPAID";
   else if (totalPaid + 0.005 >= totalInvoiced) paymentStatus = "PAID";

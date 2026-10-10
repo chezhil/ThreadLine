@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { EXPENSE_CATEGORIES, expenseSchema, monthQuerySchema } from "@/lib/validation/accounts";
 import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from "@/lib/accounts/http";
 import { currentMonthKey, istMidnight, monthRange } from "@/lib/accounts/period";
+import { expenseCategoryToLedgerType, postLedgerEntry } from "@/lib/ledger";
 
 // GET ?month=YYYY-MM[&category=power][&orderId=…]
 export async function GET(req: NextRequest) {
@@ -58,8 +59,18 @@ export async function POST(req: NextRequest) {
     if (!order) return fieldErrorResponse({ orderId: ["Order not found"] });
   }
 
-  const expense = await db.expense.create({
-    data: { ...parsed.data, date: istMidnight(parsed.data.date) },
+  const date = istMidnight(parsed.data.date);
+  const expense = await db.$transaction(async (tx) => {
+    const created = await tx.expense.create({ data: { ...parsed.data, date } });
+    await postLedgerEntry(tx, {
+      date,
+      type: expenseCategoryToLedgerType(created.category),
+      amount: created.amount,
+      sourceType: "Expense",
+      sourceId: created.id,
+      orderId: created.orderId,
+    });
+    return created;
   });
   await logAudit("Expense", expense.id, "create", null, expense, user.id);
   return NextResponse.json({ expense }, { status: 201 });
