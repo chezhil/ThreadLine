@@ -12,9 +12,8 @@ const { PrismaClient } = require("@prisma/client");
 const dev = process.env.NODE_ENV !== "production";
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-// Windows environments without junction privileges cannot run Turbopack's
-// Prisma externalization. Webpack uses regular files and keeps Socket.io live.
-const app = next({ dev, webpack: dev && process.platform === "win32" });
+// Turbopack in development on every platform (Next 16's default bundler).
+const app = next({ dev, turbopack: dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
