@@ -183,6 +183,9 @@ model Invoice {
   gst       Float
   total     Float
   status    String
+  // Additive (Module 4): invoice date, needed to put revenue in the right month.
+  // Defaulted so Module 1's invoice creation code needs no change.
+  createdAt DateTime  @default(now())
   payments  Payment[]
 }
 
@@ -219,6 +222,8 @@ model Expense {
   amount   Float
   date     DateTime
   orderId  String?
+  // Additive (Module 4): bill no. / vendor / description for the expense.
+  note     String?
 }
 
 model Notification {
