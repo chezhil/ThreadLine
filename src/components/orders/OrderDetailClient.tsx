@@ -9,6 +9,7 @@ import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import { dateIN, dateTimeIN, inr } from "@/lib/accounts/format";
 import { ErrorNote, Loading } from "@/components/accounts/Stat";
 import { OrderForm, type PickBuyer, type PickYarnType } from "./OrderForm";
+import { WhatsAppPreviewModal } from "@/components/dispatch/WhatsAppPreviewModal";
 
 interface YarnLot {
   id: string;
@@ -41,7 +42,7 @@ interface OrderDetail {
   dispatchStatus: string;
   paymentStatus: string;
   buyerId: string;
-  buyer: { name: string };
+  buyer: { name: string; contact?: string };
   fabricType: string;
   colour: string;
   gsm: number;
@@ -72,6 +73,7 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
   const order = useApi<{ order: OrderDetail }>(`/api/orders/${orderId}`);
   const yarnLots = useApi<{ yarnLots: YarnLot[] }>("/api/yarn-lots");
   const [editing, setEditing] = useState(false);
+  const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [reserveForm, setReserveForm] = useState({ yarnLotId: "", qtyKg: "" });
@@ -206,7 +208,19 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
       </Card>
 
       <Card>
-        <CardHeader title="Buyer tracking link (no login required)" />
+        <CardHeader
+          title="Buyer tracking link (no login required)"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setWhatsAppModalOpen(true)}
+              className="text-emerald-700 hover:text-emerald-800"
+            >
+              Preview WhatsApp Alert
+            </Button>
+          }
+        />
         <p className="break-all text-sm text-brand">{trackingUrl}</p>
       </Card>
 
@@ -326,6 +340,21 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
       <Drawer open={editing} onClose={() => setEditing(false)} title={`Edit ${o.orderNo}`}>
         {editing && <EditOrder order={o} onSaved={() => { setEditing(false); order.refetch(); }} />}
       </Drawer>
+
+      <WhatsAppPreviewModal
+        isOpen={whatsAppModalOpen}
+        onClose={() => setWhatsAppModalOpen(false)}
+        payload={{
+          orderNo: o.orderNo,
+          buyerName: o.buyer.name,
+          buyerPhone: o.buyer.contact || "+919876543210",
+          fabricType: o.fabricType,
+          totalMetres: o.qtyMetres,
+          rollCount: 1,
+          truckNo: "Scheduled Vehicle",
+          trackingToken: o.trackingToken,
+        }}
+      />
     </div>
   );
 }

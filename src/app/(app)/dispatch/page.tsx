@@ -24,8 +24,11 @@ import {
   ShieldCheck,
   PackageCheck,
   ChevronRight,
+  MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
+import { WhatsAppPreviewModal } from "@/components/dispatch/WhatsAppPreviewModal";
+import type { DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
 
 export default function DispatchPage() {
   const [buyers, setBuyers] = useState<any[]>([]);
@@ -47,6 +50,8 @@ export default function DispatchPage() {
   const [editTruckNo, setEditTruckNo] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
+  const [whatsAppPayload, setWhatsAppPayload] = useState<DispatchWhatsAppPayload | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -256,6 +261,27 @@ export default function DispatchPage() {
       }
 
       showToast(`Success! Truck ${truckNo} dispatched with ${selectedRollIds.length} rolls.`);
+
+      // Trigger authentic WhatsApp preview modal for the newly dispatched truck
+      const targetBuyer = buyers.find((b) => b.id === selectedBuyerId) || data?.buyer;
+      const orderNos = Array.from(new Set(selectedRolls.map((r) => r.order?.orderNo).filter(Boolean))).join(", ") || "N/A";
+      const fabricType = selectedRolls[0]?.order?.fabricType || "Textile Fabric";
+      const trackingToken = selectedRolls[0]?.order?.trackingToken || data?.rolls?.[0]?.order?.trackingToken || "";
+
+      if (targetBuyer) {
+        setWhatsAppPayload({
+          orderNo: orderNos,
+          buyerName: targetBuyer.name,
+          buyerPhone: targetBuyer.contact || "9876543210",
+          fabricType,
+          totalMetres: Math.round(totalMetres * 10) / 10,
+          rollCount: selectedRollIds.length,
+          truckNo: truckNo.trim(),
+          trackingToken: trackingToken || `trk-${clientMutationId}`,
+        });
+        setWhatsAppModalOpen(true);
+      }
+
       setSelectedRollIds([]);
       loadData();
       setActiveTab("history");
@@ -271,6 +297,26 @@ export default function DispatchPage() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const openPastDispatchWhatsApp = (disp: any) => {
+    const buyer = disp.buyer || disp.rolls?.[0]?.order?.buyer;
+    const rolls = disp.rolls || [];
+    const primaryOrder = rolls[0]?.order;
+    const orderNos = Array.from(new Set(rolls.map((r: any) => r.order?.orderNo).filter(Boolean))).join(", ") || primaryOrder?.orderNo || "N/A";
+    const totalMetres = rolls.reduce((acc: number, r: any) => acc + (r.lengthMetres || 0), 0);
+
+    setWhatsAppPayload({
+      orderNo: orderNos,
+      buyerName: buyer?.name || "Valued Buyer",
+      buyerPhone: buyer?.contact || "+919876543210",
+      fabricType: primaryOrder?.fabricType || "Textile Fabric",
+      totalMetres: Math.round(totalMetres * 10) / 10,
+      rollCount: rolls.length,
+      truckNo: disp.truckNo,
+      trackingToken: primaryOrder?.trackingToken || "demo-tracking-token",
+    });
+    setWhatsAppModalOpen(true);
   };
 
   // Calculations for current selection
@@ -619,18 +665,28 @@ export default function DispatchPage() {
                             </Button>
                           </div>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingDispatchId(disp.id);
-                              setEditTruckNo(disp.truckNo);
-                              setEditError(null);
-                            }}
-                          >
-                            Edit truck no.
-                          </Button>
+                          <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800"
+                              onClick={() => openPastDispatchWhatsApp(disp)}
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                              WhatsApp
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingDispatchId(disp.id);
+                                setEditTruckNo(disp.truckNo);
+                                setEditError(null);
+                              }}
+                            >
+                              Edit truck no.
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -672,6 +728,13 @@ export default function DispatchPage() {
         onClose={() => setScannerOpen(false)}
         onScan={handleScanRollOntoTruck}
         title="Scan Roll onto Truck"
+      />
+
+      {/* WhatsApp Dispatch Confirmation Preview */}
+      <WhatsAppPreviewModal
+        isOpen={whatsAppModalOpen}
+        onClose={() => setWhatsAppModalOpen(false)}
+        payload={whatsAppPayload}
       />
     </div>
   );

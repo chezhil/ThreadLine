@@ -33,10 +33,10 @@ export async function GET(req: NextRequest) {
     const dispatches = await db.dispatch.findMany({
       where,
       include: {
-        buyer: { select: { id: true, name: true } },
+        buyer: { select: { id: true, name: true, contact: true } },
         rolls: {
           include: {
-            order: { select: { id: true, orderNo: true, status: true, buyer: { select: { id: true, name: true } } } },
+            order: { select: { id: true, orderNo: true, status: true, fabricType: true, trackingToken: true, buyer: { select: { id: true, name: true, contact: true } } } },
             machine: true,
             yarnLot: true,
           },
@@ -316,6 +316,7 @@ export async function POST(req: NextRequest) {
     const populatedDispatch = await db.dispatch.findUnique({
       where: { id: dispatch.id },
       include: {
+        buyer: true,
         rolls: {
           include: {
             order: true,
