@@ -54,15 +54,21 @@ export interface OrderCosting {
   invoicedTotal: number;
   paid: number;
   outstanding: number;
-  /** Date of the order's first invoice — the month its profit is booked in. */
+  /** Date of the order's first invoice. */
   invoicedAt: string | null;
+  /** When the order was finished (its last truck left; for history without
+   * dispatch rows, its first invoice) — the month its profit is booked in.
+   * Null while it is still in progress. */
+  realisedAt: string | null;
   costs: OrderCostLines;
   totalCost: number;
   profit: number;
   marginPct: number | null;
   /** Total cost ÷ metres actually rolled (null until a roll exists). */
   costPerMetre: number | null;
-  /** final once invoiced or dispatched/closed; otherwise cost-to-date of work in progress. */
+  /** final once fully dispatched (or closed); otherwise cost-to-date of work
+   * in progress. An invoice alone doesn't finish an order — Module 1 raises it
+   * with the first truck, or on request before anything ships. */
   stage: "final" | "in_progress";
   activeMonths: string[];
   dataGaps: string[];
@@ -107,6 +113,7 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
         lengthMetres: true,
         qcStatus: true,
         yarnLot: { select: { yarnType: { select: { costPerKg: true } } } },
+        dispatch: { select: { dispatchedAt: true } },
       },
     }),
     db.productionLog.findMany({
@@ -119,7 +126,7 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
       },
     }),
     db.attendance.findMany({
-      select: { date: true, status: true, machineId: true, worker: { select: { dailyWage: true } } },
+      select: { date: true, status: true, machineId: true, dailyWage: true, worker: { select: { dailyWage: true } } },
     }),
     db.expense.findMany({ select: { category: true, amount: true, date: true, orderId: true } }),
     db.invoice.findMany({
@@ -230,7 +237,9 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
 
   // --- Wages, from attendance ----------------------------------------------
   for (const mark of attendance) {
-    const wage = mark.worker.dailyWage * (WAGE_FACTOR[mark.status as AttendanceStatus] ?? 0);
+    // The wage snapshotted on the mark; the worker's current wage only for
+    // rows from before the snapshot existed.
+    const wage = (mark.dailyWage ?? mark.worker.dailyWage) * (WAGE_FACTOR[mark.status as AttendanceStatus] ?? 0);
     if (wage <= 0) continue;
     const day = mark.machineId ? dayKeys.get(`${mark.machineId}|${istDateKey(mark.date)}`) : undefined;
     if (!day) {
@@ -284,6 +293,13 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
     inv.set(i.orderId, cur);
   }
 
+  const lastDispatch = new Map<string, Date>();
+  for (const r of rolls) {
+    if (!r.dispatch) continue;
+    const prev = lastDispatch.get(r.orderId);
+    if (!prev || r.dispatch.dispatchedAt > prev) lastDispatch.set(r.orderId, r.dispatch.dispatchedAt);
+  }
+
   const result: OrderCosting[] = orders.map((o) => {
     const lines = acc.get(o.id)!;
     const t = trace.get(o.id)!;
@@ -294,6 +310,9 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
     const activeMonths = months.get(o.id)!;
     activeMonths.add(istMonthKey(o.createdAt));
     if (i?.first) activeMonths.add(istMonthKey(i.first));
+    const final = FINAL_STATUSES.has(o.status);
+    const realisedAt = final ? (lastDispatch.get(o.id) ?? i?.first ?? o.createdAt) : null;
+    if (realisedAt) activeMonths.add(istMonthKey(realisedAt));
 
     const dataGaps: string[] = [];
     if (t.rolls === 0) dataGaps.push("No rolls recorded for this order yet, so yarn cost is ₹0.");
@@ -318,6 +337,7 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
       paid: r2(i?.paid ?? 0),
       outstanding: r2((i?.total ?? 0) - (i?.paid ?? 0)),
       invoicedAt: i?.first ? i.first.toISOString() : null,
+      realisedAt: realisedAt ? realisedAt.toISOString() : null,
       costs: {
         yarn: r2(lines.yarn),
         processWastage: r2(lines.processWastage),
@@ -331,7 +351,7 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
       profit: r2(profit),
       marginPct: revenue > 0 ? r2((profit / revenue) * 100) : null,
       costPerMetre: t.rollMetres > 0 ? r2(totalCost / t.rollMetres) : null,
-      stage: i || FINAL_STATUSES.has(o.status) ? "final" : "in_progress",
+      stage: final ? "final" : "in_progress",
       activeMonths: [...activeMonths].sort(),
       dataGaps,
       trace: {
@@ -355,9 +375,10 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
   return { orders: result, pools };
 }
 
-/** Orders whose profit is booked in `month`: first invoiced in that month. */
+/** Orders whose profit is booked in `month`: finished (fully dispatched or
+ * closed) in that month. */
 export function ordersRealisedIn(orders: OrderCosting[], month: string): OrderCosting[] {
-  return orders.filter((o) => o.invoicedAt && istMonthKey(new Date(o.invoicedAt)) === month);
+  return orders.filter((o) => o.stage === "final" && o.realisedAt && istMonthKey(new Date(o.realisedAt)) === month);
 }
 
 /** Orders still in progress that had any activity in `month`. */

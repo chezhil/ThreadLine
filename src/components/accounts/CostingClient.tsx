@@ -184,7 +184,7 @@ function OrderBreakdown({ orderId }: { orderId: string }) {
         </p>
         <div className="mt-1 flex items-center gap-2">
           <Badge status={o.status} />
-          <span className="text-xs text-gray-500">{o.stage === "final" ? `Final · invoiced ${dateIN(o.invoicedAt)}` : "In progress · cost to date"}</span>
+          <span className="text-xs text-gray-500">{o.stage === "final" ? `Final · completed ${dateIN(o.realisedAt)}` : "In progress · cost to date"}</span>
         </div>
       </div>
 
