@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
+import { seedAccounts } from "./seed-accounts";
 
 const db = new PrismaClient();
 
@@ -132,6 +133,13 @@ async function main() {
       },
     });
   }
+
+  // ---------------------------------------------------------------------
+  // Module 4 (Devacharan) — workers, a month of attendance, expenses and
+  // payments. Implementation in scripts/seed-accounts.ts; runs last because
+  // it reads the orders, machines, lots and invoices seeded above.
+  // ---------------------------------------------------------------------
+  await seedAccounts(db);
 
   console.log("Seed complete.");
 }
