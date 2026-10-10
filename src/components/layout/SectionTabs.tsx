@@ -2,18 +2,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const TABS = [
-  { href: "/production/floor-board", label: "Floor board" },
-  { href: "/production/work-orders", label: "Work orders" },
-  { href: "/production/machines", label: "Machines" },
-];
-
-export function ProductionTabs() {
+// Tab strip for a section's sub-pages (same look as the Accounts tabs).
+export function SectionTabs({ label, tabs }: { label: string; tabs: { href: string; label: string }[] }) {
   const pathname = usePathname();
   return (
-    <nav className="-mx-4 overflow-x-auto border-b border-border px-4" aria-label="Production sections">
+    <nav className="-mx-4 overflow-x-auto border-b border-border px-4" aria-label={label}>
       <div className="flex gap-1">
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const active = pathname.startsWith(t.href);
           return (
             <Link

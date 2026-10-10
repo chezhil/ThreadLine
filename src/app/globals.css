@@ -26,3 +26,26 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Module 3: when a QR roll label is printed, print only the label. */
+@media print {
+  body.printing-roll-label * {
+    visibility: hidden;
+  }
+  body.printing-roll-label .printable-area,
+  body.printing-roll-label .printable-area * {
+    visibility: visible;
+  }
+  body.printing-roll-label .printable-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 16px;
+    background: white;
+  }
+  body.printing-roll-label .no-print {
+    display: none !important;
+  }
+}

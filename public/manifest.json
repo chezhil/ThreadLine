@@ -1,0 +1,16 @@
+{
+  "name": "ThreadLine Textile Management",
+  "short_name": "ThreadLine",
+  "description": "Textile Mill Management System - Offline-Ready & Realtime",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1d4ed8",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

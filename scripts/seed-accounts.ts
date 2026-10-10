@@ -40,18 +40,14 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const WORKERS = [
   { name: "Murugesan K", role: "spinner", dailyWage: 720, shift: "Morning (Shift A)" },
-  { name: "Lakshmi Devi", role: "spinner", dailyWage: 700, shift: "Evening (Shift B)" },
   { name: "Senthil Kumar", role: "weaver", dailyWage: 850, shift: "Morning (Shift A)" },
   { name: "Arumugam P", role: "weaver", dailyWage: 820, shift: "Morning (Shift A)" },
   { name: "Kavitha R", role: "weaver", dailyWage: 820, shift: "Evening (Shift B)" },
   { name: "Ravi Shankar", role: "weaver", dailyWage: 800, shift: "Evening (Shift B)" },
   { name: "Selvi M", role: "weaver", dailyWage: 780, shift: "Night (Shift C)" },
   { name: "Prakash Yadav", role: "dyer", dailyWage: 900, shift: "Morning (Shift A)" },
-  { name: "Imran Sheikh", role: "dyer", dailyWage: 880, shift: "Evening (Shift B)" },
   { name: "Ganesan S", role: "fitter", dailyWage: 950, shift: "Morning (Shift A)" },
   { name: "Meena Kumari", role: "qc_checker", dailyWage: 760, shift: "Morning (Shift A)" },
-  { name: "Raju Bhai", role: "helper", dailyWage: 560, shift: "Morning (Shift A)" },
-  { name: "Sundari V", role: "helper", dailyWage: 540, shift: "Evening (Shift B)" },
   { name: "Vinod Patil", role: "supervisor", dailyWage: 1100, shift: "Morning (Shift A)" },
 ];
 
@@ -104,19 +100,21 @@ export async function seedAccounts(db: PrismaClient, now = new Date()) {
   }
   let expenses = 0;
 
+  // Amounts are sized to the seeded mill's output (a few thousand metres a
+  // month across four looms), so the demo P&L shows a plausible margin.
   // Power: weekly TNEB/BESCOM meter readings + a monthly DG diesel top-up.
   for (const daysAgo of [28, 21, 14, 7]) {
     const d = istDay(daysAgo, now);
-    if (await expense("power", 42000 + Math.round(rand() * 9000), d, `Electricity bill — week ending ${d.toISOString().slice(0, 10)}`)) expenses++;
+    if (await expense("power", 11000 + Math.round(rand() * 2500), d, `Electricity bill — week ending ${d.toISOString().slice(0, 10)}`)) expenses++;
   }
-  if (await expense("other", 18500, istDay(16, now), "DG set diesel top-up (400 L)")) expenses++;
+  if (await expense("other", 6500, istDay(16, now), "DG set diesel top-up (70 L)")) expenses++;
 
   // Overhead: rent, maintenance contract, insurance, admin.
   const overheads: [number, number, string][] = [
-    [27, 85000, "Factory shed rent — monthly"],
-    [20, 24000, "Loom AMC — Picanol service visit"],
-    [12, 15500, "Fire & machinery insurance — monthly premium"],
-    [5, 9800, "Office, phone and internet"],
+    [27, 30000, "Factory shed rent — monthly"],
+    [20, 8000, "Loom AMC — service visit"],
+    [12, 5200, "Fire & machinery insurance — monthly premium"],
+    [5, 3400, "Office, phone and internet"],
   ];
   for (const [daysAgo, amt, note] of overheads) if (await expense("overhead", amt, istDay(daysAgo, now), note)) expenses++;
 

@@ -7,7 +7,8 @@ import { productionActor } from "@/lib/production/auth";
 import { fieldError, jsonBody, problem } from "@/lib/production/http";
 import { refreshProductionAlerts } from "@/lib/production/insights";
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const params = await context.params;
   const actor = await productionActor();
   if ("response" in actor) return actor.response;
   if (!productionIdSchema.safeParse(params.id).success) return problem("Invalid machine identifier", 400, "id");

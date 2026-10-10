@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { BottomTabs } from "@/components/layout/BottomTabs";
 import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { NotificationBell } from "@/components/alerts/NotificationBell";
+import { SyncStatus } from "@/components/quality/SyncStatus";
 
 // Every page behind this layout reads the session cookie and live DB rows —
 // nothing here is safe to prerender/cache.
@@ -19,7 +20,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-12 items-center justify-between gap-2 border-b border-border bg-white px-4 py-2">
           <Breadcrumbs />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <SyncStatus canBackup={user.role === "owner"} />
             <NotificationBell />
           </div>
         </header>

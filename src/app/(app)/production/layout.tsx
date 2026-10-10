@@ -1,9 +1,15 @@
 import { EmptyState } from "@/components/ui";
-import { ProductionTabs } from "@/components/production/ProductionTabs";
+import { SectionTabs } from "@/components/layout/SectionTabs";
 import { requireRole } from "@/lib/auth";
 
 // Reads the session to gate the production screens — never prerender.
 export const instant = false;
+
+const TABS = [
+  { href: "/production/floor-board", label: "Floor board" },
+  { href: "/production/work-orders", label: "Work orders" },
+  { href: "/production/machines", label: "Machines" },
+];
 
 export default async function ProductionLayout({ children }: { children: React.ReactNode }) {
   const user = await requireRole("owner", "floor_supervisor");
@@ -12,7 +18,7 @@ export default async function ProductionLayout({ children }: { children: React.R
   }
   return (
     <div className="flex flex-col gap-4">
-      <ProductionTabs />
+      <SectionTabs label="Production sections" tabs={TABS} />
       {children}
     </div>
   );

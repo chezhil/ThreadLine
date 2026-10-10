@@ -137,16 +137,14 @@ interface DefectsResponse {
   byMachine: { id: string; name: string; reject: number; total: number; rejectRate: number }[];
 }
 
-// Module 3 owns /api/analytics/defects. If it isn't merged yet (404), show that
-// plainly instead of an error.
+// Reads Module 3's /api/analytics/defects.
 function DefectsPanel() {
-  const [state, setState] = useState<{ status: "loading" | "ok" | "missing" | "error"; data?: DefectsResponse; message?: string }>({ status: "loading" });
+  const [state, setState] = useState<{ status: "loading" | "ok" | "error"; data?: DefectsResponse; message?: string }>({ status: "loading" });
   useEffect(() => {
     let cancelled = false;
     fetch("/api/analytics/defects?days=30")
       .then(async (res) => {
         if (cancelled) return;
-        if (res.status === 404) return setState({ status: "missing" });
         if (!res.ok) return setState({ status: "error", message: `Request failed (${res.status})` });
         const json = (await res.json()) as DefectsResponse;
         if (!cancelled) setState({ status: "ok", data: json });
@@ -159,9 +157,8 @@ function DefectsPanel() {
 
   return (
     <Card>
-      <CardHeader title="Quality callouts (30 days)" action={<Link href="/quality/qc" className="text-xs font-medium text-brand hover:underline">Quality →</Link>} />
+      <CardHeader title="Quality callouts (30 days)" action={<Link href="/quality/defects" className="text-xs font-medium text-brand hover:underline">Defect analytics →</Link>} />
       {state.status === "loading" && <Loading />}
-      {state.status === "missing" && <EmptyState title="Defect analytics not live yet" description="Reject-rate callouts appear here once the Quality module's analytics endpoint is merged." />}
       {state.status === "error" && <ErrorNote message={`Couldn't load defect analytics: ${state.message}`} />}
       {state.status === "ok" && state.data && (
         state.data.summary.totalInspected === 0 ? (

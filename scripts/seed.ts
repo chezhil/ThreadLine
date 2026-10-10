@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import { seedProduction } from "./seed-production";
+import { seedQuality } from "./seed-quality";
 import { seedAccounts } from "./seed-accounts";
 
 const db = new PrismaClient();
@@ -141,6 +142,12 @@ async function main() {
   // ---------------------------------------------------------------------
   console.log("Seeding production...");
   await seedProduction(db);
+
+  // ---------------------------------------------------------------------
+  // Module 3 (Aditya) — rolls, QC records, dispatches and their invoices.
+  // Implementation in scripts/seed-quality.ts.
+  // ---------------------------------------------------------------------
+  await seedQuality(db);
 
   // ---------------------------------------------------------------------
   // Module 4 (Devacharan) — workers, a month of attendance, expenses and

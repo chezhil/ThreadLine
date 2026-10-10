@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "threadline_session";
 
-const PUBLIC_PATHS = ["/login", "/track"];
+const PUBLIC_PATHS = ["/login", "/track", "/manifest.json", "/icon.svg", "/sw.js"];
 const PUBLIC_API_PREFIXES = ["/api/auth/login", "/api/track"];
 
 export function proxy(req: NextRequest) {

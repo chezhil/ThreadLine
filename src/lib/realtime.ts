@@ -11,6 +11,10 @@ export const RealtimeEvents = {
   OrderStatus: "order:status",
   StockChanged: "stock:changed",
   NotificationNew: "notification:new",
+  // Module 3 (quality/dispatch)
+  RollCreated: "roll:created",
+  QcCompleted: "qc:completed",
+  DispatchCompleted: "dispatch:completed",
 } as const;
 
 export type RealtimeEvent = (typeof RealtimeEvents)[keyof typeof RealtimeEvents];
