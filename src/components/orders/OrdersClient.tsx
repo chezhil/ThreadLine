@@ -138,6 +138,7 @@ function NewOrderForm({
       qtyMetres: Number(form.qtyMetres),
       pricePerMetre: Number(form.pricePerMetre),
       deadline: form.deadline,
+      ...(form.yarnTypeId ? { yarnTypeId: form.yarnTypeId, wastagePct: Number(form.wastagePct) } : {}),
     });
     setSubmitting(false);
     if (!ok) {

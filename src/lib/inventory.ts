@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { emit, RealtimeEvents } from "./realtime";
+import { writeTransaction } from "./concurrency";
 
 export async function totalRemainingKg(yarnTypeId: string): Promise<number> {
   const lots = await db.yarnLot.findMany({
@@ -9,6 +10,10 @@ export async function totalRemainingKg(yarnTypeId: string): Promise<number> {
   return lots.reduce((sum, lot) => sum + lot.qtyRemainingKg, 0);
 }
 
+// One open low-stock alert per yarn type: a further reservation updates its
+// figure instead of piling up another alert, and a refill above the
+// threshold resolves it (so the next shortage raises a fresh one). Same
+// episode pattern as the derived alerts in accounts/alerts.ts.
 export async function checkLowStockAndNotify(yarnTypeId: string) {
   const yarnType = await db.yarnType.findUnique({ where: { id: yarnTypeId } });
   if (!yarnType) return;
@@ -16,14 +21,25 @@ export async function checkLowStockAndNotify(yarnTypeId: string) {
   const remaining = await totalRemainingKg(yarnTypeId);
   emit(RealtimeEvents.StockChanged, { yarnTypeId, remainingKg: remaining });
 
-  if (remaining <= yarnType.lowStockThresholdKg) {
-    const notification = await db.notification.create({
-      data: {
-        type: "low_stock",
-        message: `${yarnType.name} (${yarnType.colour}) is low: ${remaining.toFixed(1)}kg left, threshold ${yarnType.lowStockThresholdKg}kg.`,
-        severity: "warning",
-      },
-    });
-    emit(RealtimeEvents.NotificationNew, notification);
-  }
+  const type = `low_stock:${yarnTypeId}`;
+  const low = remaining <= yarnType.lowStockThresholdKg;
+  const message = `${yarnType.name} (${yarnType.colour}) is low: ${remaining.toFixed(1)}kg left, threshold ${yarnType.lowStockThresholdKg}kg.`;
+
+  const raised = await writeTransaction(async (tx) => {
+    const open = await tx.notification.findFirst({ where: { type, read: false } });
+    if (!low) {
+      if (open) {
+        await tx.notification.update({ where: { id: open.id }, data: { read: true, type: `${type}:cleared:${Date.now()}` } });
+      }
+      return null;
+    }
+    if (open) {
+      if (open.message === message) return null;
+      // A changed figure is news to everyone again.
+      await tx.notificationRead.deleteMany({ where: { notificationId: open.id } });
+      return tx.notification.update({ where: { id: open.id }, data: { message, createdAt: new Date() } });
+    }
+    return tx.notification.create({ data: { type, message, severity: "warning" } });
+  });
+  if (raised) emit(RealtimeEvents.NotificationNew, raised);
 }

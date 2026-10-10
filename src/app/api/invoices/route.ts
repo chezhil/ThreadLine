@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
   if (!order) {
     return NextResponse.json({ fieldErrors: { orderId: ["Order not found"] } }, { status: 400 });
   }
+  if (order.status === "NEW") {
+    return NextResponse.json({ fieldErrors: { orderId: ["Confirm the order before invoicing it"] } }, { status: 400 });
+  }
 
   // The invoice-number generator counts existing rows, so two concurrent
   // requests for the same (uninvoiced) order could both decide to create one.

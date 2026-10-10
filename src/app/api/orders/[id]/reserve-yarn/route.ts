@@ -43,6 +43,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!yarnLotExists) {
     return NextResponse.json({ fieldErrors: { yarnLotId: ["Yarn lot not found"] } }, { status: 400 });
   }
+  // Yarn is reserved before or during production, not for orders that are
+  // finished or already shipping.
+  if (order.status === "CLOSED" || !(["NEW", "CONFIRMED"].includes(order.status) || order.productionStatus === "IN_PRODUCTION")) {
+    return NextResponse.json({ error: `Yarn can't be reserved for an order that is ${order.status}` }, { status: 400 });
+  }
+  // A lot received against one specific order is that order's yarn.
+  if (yarnLotExists.linkedOrderId && yarnLotExists.linkedOrderId !== orderId) {
+    return NextResponse.json({ fieldErrors: { yarnLotId: ["This lot was received for another order"] } }, { status: 400 });
+  }
 
   // The sufficiency check and the decrement must happen on the same read —
   // doing the check before the transaction (as this used to) lets two

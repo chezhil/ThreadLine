@@ -233,7 +233,7 @@ function NewYarnLotForm({
     supplierId: "",
     lotNo: "",
     qtyReceivedKg: "",
-    receivedAt: new Date().toISOString().slice(0, 10),
+    receivedAt: todayIST(),
   });
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -251,7 +251,7 @@ function NewYarnLotForm({
       return;
     }
     setErrors({});
-    setForm({ yarnTypeId: "", supplierId: "", lotNo: "", qtyReceivedKg: "", receivedAt: new Date().toISOString().slice(0, 10) });
+    setForm({ yarnTypeId: "", supplierId: "", lotNo: "", qtyReceivedKg: "", receivedAt: todayIST() });
     onCreated();
   }
 
@@ -328,4 +328,9 @@ function SuppliersTab({ suppliers, onCreated }: { suppliers: Supplier[]; onCreat
       />
     </div>
   );
+}
+
+/** Today's date in the mill's time zone, as YYYY-MM-DD for a date input. */
+function todayIST() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 }

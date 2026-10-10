@@ -6,6 +6,7 @@ import { generateOrderNo, generateTrackingToken } from "@/lib/order-numbers";
 import { logAudit } from "@/lib/audit";
 import { emit, RealtimeEvents } from "@/lib/realtime";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
+import { checkFeasibility } from "@/lib/feasibility";
 
 export async function GET() {
   const user = await requireRole("owner");
@@ -40,12 +41,27 @@ export async function POST(req: NextRequest) {
   // creations could otherwise compute the same number. The transaction makes
   // one attempt atomic (SQLite serialises the write), withRetry re-attempts
   // from scratch (fresh count) if it still collides.
+  const { yarnTypeId, wastagePct, ...orderData } = parsed.data;
+  let feasibilityResult: string | null = null;
+  if (yarnTypeId) {
+    const yarnType = await db.yarnType.findUnique({ where: { id: yarnTypeId } });
+    if (!yarnType) return NextResponse.json({ fieldErrors: { yarnTypeId: ["Yarn type not found"] } }, { status: 400 });
+    const result = await checkFeasibility({
+      gsm: orderData.gsm,
+      qtyMetres: orderData.qtyMetres,
+      deadline: orderData.deadline,
+      wastagePct: wastagePct ?? 8,
+      yarnTypeId,
+    });
+    feasibilityResult = JSON.stringify({ ...result, yarnTypeId, checkedAt: new Date().toISOString() });
+  }
+
   const trackingToken = generateTrackingToken();
   const order = await withRetry(() =>
     writeTransaction(async (tx) => {
       const orderNo = await generateOrderNo(tx);
       return tx.order.create({
-        data: { ...parsed.data, orderNo, trackingToken, status: "NEW" },
+        data: { ...orderData, orderNo, trackingToken, status: "NEW", feasibilityResult },
       });
     }),
   );

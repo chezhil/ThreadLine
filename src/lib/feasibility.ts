@@ -5,6 +5,7 @@ import { totalRemainingKg } from "./inventory";
 // here rather than hidden in a magic number so the formula stays auditable.
 const ASSUMED_FABRIC_WIDTH_METRES = 1.5;
 const SHIFTS_PER_DAY = 2;
+const STAGE_MACHINE_TYPES = ["spinning", "loom", "dyeing"] as const;
 
 export interface FeasibilityInput {
   gsm: number;
@@ -34,11 +35,18 @@ export async function checkFeasibility(input: FeasibilityInput): Promise<Feasibi
   const yarnAvailableKg = await totalRemainingKg(yarnTypeId);
   const shortfallKg = Math.max(0, yarnNeededKg - yarnAvailableKg);
 
+  // Cloth passes spinning → weaving (looms) → dyeing, so the mill's
+  // throughput is that of its slowest stage, not the sum of every machine.
   const machines = await db.machine.findMany({
     where: { status: { in: ["RUNNING", "IDLE"] } },
-    select: { capacityMetresPerShift: true },
+    select: { type: true, capacityMetresPerShift: true },
   });
-  const capacityPerShift = machines.reduce((sum, m) => sum + m.capacityMetresPerShift, 0);
+  const perStage = STAGE_MACHINE_TYPES.map((type) => ({
+    type,
+    capacity: machines.filter((m) => m.type === type).reduce((sum, m) => sum + m.capacityMetresPerShift, 0),
+  }));
+  const bottleneck = perStage.reduce((min, s) => (s.capacity < min.capacity ? s : min));
+  const capacityPerShift = bottleneck.capacity;
 
   const daysUntilDeadline = Math.max(
     0,
@@ -49,9 +57,11 @@ export async function checkFeasibility(input: FeasibilityInput): Promise<Feasibi
   if (capacityAvailableMetres < qtyMetres) {
     return {
       status: "DEADLINE_NOT_REALISTIC",
-      message: `DEADLINE NOT REALISTIC: available machine capacity by the deadline is ~${Math.round(
+      message: `DEADLINE NOT REALISTIC: by the deadline the mill can put ~${Math.round(
         capacityAvailableMetres,
-      )}m across ${machines.length} usable machine(s), but the order needs ${qtyMetres}m.`,
+      )}m through every stage (${bottleneck.type} is the bottleneck${
+        bottleneck.capacity === 0 ? ", with no usable machine" : ""
+      }), but the order needs ${qtyMetres}m.`,
       yarnNeededKg,
       yarnAvailableKg,
       shortfallKg,
