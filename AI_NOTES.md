@@ -492,3 +492,75 @@ unfixed version would have reintroduced that race or duplicated the fix.
   from item 3's (not-yet-built) ledger — noted in the addendum as the thing
   to point at the ledger once it exists, so there's one source of truth for
   money figures instead of two.
+
+## Bug-fix pass on `main` (Devacharan, Claude) — local branch `fix/main-followups`, not pushed
+
+Branch made from `origin/main` (7401973). Naman's `origin/feature/production`
+(revocable session table + CI workflow) is merged in rather than rewritten.
+Every change below was run against a fresh database (`prisma migrate deploy`
++ seed + production build).
+
+**What was broken and is now fixed**
+
+- Concurrent writes: SQLite deferred transactions deadlocked and returned 500
+  after 5 s; writes now go through one in-process queue that takes the write
+  lock first (`writeTransaction` in `src/lib/concurrency.ts`).
+- Sessions: the cookie was the raw user id (and user ids were visible in roll
+  reads and socket events), so anyone could sign in as the owner. Naman's
+  random-token session table is now in; roll reads and socket payloads no
+  longer carry user ids; the realtime socket needs a live session.
+- Offline queue posted replays to `http://localhost:3000` in the browser; it
+  now uses the app's own origin, is scoped to the signed-in user, keeps
+  401/403 items until that user signs in again, replays oldest first, shows
+  failed items with Retry/Discard, and the online attempt and the offline
+  fallback share one `clientMutationId` (no duplicates when a request dies
+  mid-flight). The server only accepts a replayed id for the same roll /
+  buyer (409 otherwise).
+- Production: completing spinning marked the whole order done (QC) and then
+  blocked weaving. Production is DONE only when dyeing completes. A part
+  shipment while production runs is PARTIALLY_DISPATCHED, not DISPATCHED.
+  READY needs at least one PASS roll (all-REWORK/REJECT orders stay in QC and
+  no "ready" alert fires with nothing to ship). Every derived status change
+  (QC→READY, payments, production) is audited and broadcast.
+- Roll minting: the form sent the order id as the work order id and only
+  offered machines/lots from existing rolls. New `GET /api/rolls/mint-options`
+  feeds it; the API forces PENDING, checks weaving WO / its loom / the
+  order's yarn, rejects NEW/CONFIRMED/CLOSED orders, and numbers rolls inside
+  the write transaction.
+- QC racing a dispatch could re-grade a shipped roll (now conditional
+  update); unknown defect ids are rejected; late offline inspections keep
+  their real time and don't override a newer grade.
+- Dispatch of rolls from several orders invoiced only the first order; every
+  order now gets its invoice. GST preview used the first roll's price.
+- Restore overwrote the live file in place after a header check; it now
+  validates integrity, migration version and an owner account on a copy, then
+  swaps atomically under the write lock. Backup uses `VACUUM INTO`.
+- Module 4: costing called an order "final" as soon as any invoice existed
+  (now: fully dispatched/closed, booked in the month of its last truck);
+  raising a wage rewrote past months (attendance now stores the day's wage);
+  concurrent muster saves could double-mark (unique worker/day/shift); one
+  user's "mark all read" cleared everyone's alerts (per-user read marks);
+  the assistant read "margin" as March and "decrease" as December.
+- Smaller: low-stock alerts piled up (one per yarn type now, cleared on
+  refill), reservations against closed orders or another order's lot,
+  invoices for NEW orders, future intake dates, feasibility summed every
+  machine instead of the bottleneck stage, date-only deadlines were 05:30
+  IST, forms stuck on "saving" after a non-JSON error, mobile tabs linked
+  pages the role can't open and phones had no sign-out, machine delete
+  ignored attendance, tracking page showed nothing for CLOSED.
+
+**Migrations added:** `20261010100000_alert_delivery_outbox`,
+`20261010110000_wage_snapshot_and_user_reads` (plus Naman's
+`20261010090000_revocable_sessions`).
+
+**Checks run on this branch** (fresh DB each): tsc, lint (0 errors),
+build, verify-runtime (incl. socket refuses anonymous), verify-integration
+65/65, verify-accounts-api 53/53, verify-order-status 30/30,
+verify-concurrency 11/11, verify-costing, verify-assistant, verify-module3,
+test-offline-sync, test-backup-restore, and the Playwright tours (every role on desktop and phone: no console errors, 4xx/5xx or overflow; flows; offline QC + dispatch replay exactly once).
+
+**Known gaps:** seeded IN_PRODUCTION orders have no yarn reservation (the
+mint check accepts a lot the order's earlier rolls used); floor supervisors
+may mint rolls via the API but the Quality pages are owner/QC only; the
+service worker can still cache a page a role is denied until sign-out
+clears it; the alert outbox has no caller yet.
