@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { logAudit } from "@/lib/audit";
 import { emit } from "@/lib/realtime";
 import { productionLogSchema } from "@/lib/validation/production";
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return fieldError(parsed.error);
   const input = parsed.data;
   try {
-    const result = await db.$transaction(async (tx) => {
+    const result = await writeTransaction(async (tx) => {
       const workOrder = await tx.workOrder.findUnique({ where: { id: input.workOrderId }, include: { machine: true, order: true } });
       if (!workOrder) throw new EntryError("workOrderId", "Work order not found");
       if (workOrder.status === "COMPLETED") throw new EntryError("workOrderId", "Work order is complete");

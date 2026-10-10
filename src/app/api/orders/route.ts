@@ -5,7 +5,7 @@ import { orderCreateSchema } from "@/lib/validation/order";
 import { generateOrderNo, generateTrackingToken } from "@/lib/order-numbers";
 import { logAudit } from "@/lib/audit";
 import { emit, RealtimeEvents } from "@/lib/realtime";
-import { withRetry } from "@/lib/concurrency";
+import { withRetry, writeTransaction } from "@/lib/concurrency";
 
 export async function GET() {
   const user = await requireRole("owner");
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   // from scratch (fresh count) if it still collides.
   const trackingToken = generateTrackingToken();
   const order = await withRetry(() =>
-    db.$transaction(async (tx) => {
+    writeTransaction(async (tx) => {
       const orderNo = await generateOrderNo(tx);
       return tx.order.create({
         data: { ...parsed.data, orderNo, trackingToken, status: "NEW" },

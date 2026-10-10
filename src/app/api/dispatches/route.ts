@@ -7,7 +7,7 @@ import { emit, RealtimeEvents } from "@/lib/realtime";
 import { qualityActor } from "@/lib/quality/auth";
 import { computeInvoiceTotals } from "@/lib/billing";
 import { generateInvoiceNo } from "@/lib/order-numbers";
-import { withRetry } from "@/lib/concurrency";
+import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { recomputeDispatchStatus } from "@/lib/order-status";
 
 
@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     // ordersDispatched/invoiceCreated are declared inside so a retried
     // attempt starts clean instead of re-using a partial prior attempt's.
     const { dispatch, invoiceId, invoice, invoiceCreated, ordersDispatched } = await withRetry(() =>
-      db.$transaction(async (tx) => {
+      writeTransaction(async (tx) => {
         let invoice = await tx.invoice.findFirst({ where: { orderId: primaryOrder.id } });
         let invoiceCreated = false;
         if (!invoice) {

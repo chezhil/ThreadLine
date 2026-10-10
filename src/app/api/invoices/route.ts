@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/auth";
 import { generateInvoiceNo } from "@/lib/order-numbers";
 import { computeInvoiceTotals } from "@/lib/billing";
 import { logAudit } from "@/lib/audit";
-import { withRetry } from "@/lib/concurrency";
+import { withRetry, writeTransaction } from "@/lib/concurrency";
 
 const createInvoiceSchema = z.object({
   orderId: z.string().min(1),
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   // The transaction makes one attempt atomic; withRetry re-attempts (with a
   // fresh find-or-create, not a stale one) if it still collides.
   const { invoice, created } = await withRetry(() =>
-    db.$transaction(async (tx) => {
+    writeTransaction(async (tx) => {
       const existing = await tx.invoice.findFirst({ where: { orderId: order.id } });
       if (existing) return { invoice: existing, created: false };
 

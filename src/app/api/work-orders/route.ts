@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { logAudit } from "@/lib/audit";
 import { emit } from "@/lib/realtime";
 import { workOrderSchema } from "@/lib/validation/production";
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return fieldError(parsed.error);
   const input = parsed.data;
   try {
-    const result = await db.$transaction(async (tx) => {
+    const result = await writeTransaction(async (tx) => {
       const [order, machine] = await Promise.all([
         tx.order.findUnique({ where: { id: input.orderId }, include: { reservations: true, workOrders: true } }),
         tx.machine.findUnique({ where: { id: input.machineId } }),

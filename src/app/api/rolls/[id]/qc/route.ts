@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { qcInspectionSchema } from "@/lib/validation/roll";
 import { handleZodError } from "@/lib/validation/format-errors";
 import { logAudit } from "@/lib/audit";
@@ -66,7 +67,7 @@ export async function POST(
 
     // Create the QC record, update the roll, and recompute the order-level
     // qcStatus aggregate, all atomically.
-    const { qcRecord, updatedRoll } = await db.$transaction(async (tx) => {
+    const { qcRecord, updatedRoll } = await writeTransaction(async (tx) => {
       const qcRecord = await tx.qCRecord.create({
         data: {
           id: data.clientMutationId || undefined,

@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { emit } from "@/lib/realtime";
+import { writeTransaction } from "@/lib/concurrency";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -118,7 +119,7 @@ export async function productionInsights(db: PrismaClient, now = new Date()) {
 export async function refreshProductionAlerts(db: PrismaClient) {
   const insights = await productionInsights(db);
   const active = new Set<string>();
-  const notifications = await db.$transaction(async (tx) => {
+  const notifications = await writeTransaction(db, async (tx) => {
     const created: Array<{ id: string }> = [];
     for (const risk of insights.delayRisks) {
       const type = `production_delay:${risk.orderId}`;

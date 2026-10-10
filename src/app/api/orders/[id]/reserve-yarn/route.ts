@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { checkLowStockAndNotify } from "@/lib/inventory";
-import { withRetry } from "@/lib/concurrency";
+import { withRetry, writeTransaction } from "@/lib/concurrency";
 
 const reserveSchema = z.object({
   yarnLotId: z.string().min(1),
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   let reservation;
   try {
     reservation = await withRetry(() =>
-      db.$transaction(async (tx) => {
+      writeTransaction(async (tx) => {
         const yarnLot = await tx.yarnLot.findUniqueOrThrow({ where: { id: parsed.data.yarnLotId } });
         if (parsed.data.qtyKg > yarnLot.qtyRemainingKg) {
           throw new InsufficientStock(yarnLot.qtyRemainingKg);

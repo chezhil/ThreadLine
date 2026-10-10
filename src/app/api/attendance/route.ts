@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { attendanceBatchSchema, monthQuerySchema, SHIFTS, WAGE_FACTOR, type AttendanceStatus } from "@/lib/validation/accounts";
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
   const audits: Parameters<typeof logAudit>[] = [];
   let created = 0;
   let updated = 0;
-  await db.$transaction(async (tx) => {
+  await writeTransaction(async (tx) => {
     for (const e of entries) {
       const prev = byWorker.get(e.workerId);
       if (prev) {

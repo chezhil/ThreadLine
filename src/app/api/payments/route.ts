@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { writeTransaction } from "@/lib/concurrency";
 import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { monthQuerySchema, paymentSchema } from "@/lib/validation/accounts";
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest) {
   // payments saved at once can't together overpay the invoice.
   let payment;
   try {
-    payment = await db.$transaction(async (tx) => {
+    payment = await writeTransaction(async (tx) => {
       const created = await tx.payment.create({ data: { invoiceId, amount, mode, receivedAt: at } });
       const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");

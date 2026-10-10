@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "../db";
 import { emit, RealtimeEvents } from "../realtime";
+import { writeTransaction } from "../concurrency";
 
 // Server side of the notification centre. Any module may insert into
 // Notification; this file adds the two alert kinds from the spec that no
@@ -63,7 +64,7 @@ export async function syncDerivedAlerts(db: PrismaClient = defaultDb) {
   // set and create any missing ones inside the same transaction, so SQLite
   // serialises the two calls instead of racing them (same pattern as the
   // concurrency-safety pass: see ../concurrency.ts and HARDENING_ADDENDUM.md).
-  const created = await db.$transaction(async (tx) => {
+  const created = await writeTransaction(db, async (tx) => {
     const open = await tx.notification.findMany({
       where: {
         OR: DERIVED_PREFIXES.map((p) => ({ type: { startsWith: p } })),
