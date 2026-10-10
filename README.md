@@ -56,3 +56,8 @@ Open http://localhost:3000. Seeded demo logins (see `scripts/seed.ts`):
 - Realtime (Socket.io) needs the custom `server.js` entrypoint, already wired
   into `npm run dev` / `npm run start` — don't swap in plain `next dev`.
 - Next.js 16 + Prisma 5.22 pinned on purpose — see `AI_NOTES.md` for why.
+
+## Stitch UI preview
+
+The exported [executive dashboard](design/stitch/README.md) is available at
+`/stitch/executive-dashboard/index.html` after signing in.
