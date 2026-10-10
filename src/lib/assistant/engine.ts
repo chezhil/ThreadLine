@@ -101,12 +101,22 @@ export function planWithRules(question: string): Plan {
   const { month, lastMonth } = dateContext();
 
   let m: string | undefined;
-  if (/last month|previous month/.test(q)) m = lastMonth;
+  if (/\bthis month\b|\bcurrent month\b/.test(q)) m = month;
+  else if (/last month|previous month/.test(q)) m = lastMonth;
   else {
-    const named = q.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{4})?\b/);
+    // Whole month names or 3-letter abbreviations only — "margin", "marks",
+    // "decrease" must not read as March/December. "may" is also an ordinary
+    // word, so it only counts with a year or after in/for/of/during.
+    const named = q.match(
+      /\b(january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec|(?:(?<=\b(?:in|for|of|during)\s+)may)|may(?=\s*\d{4}))\b\.?\s*(\d{4})?/,
+    );
     if (named) {
-      const year = named[2] ?? month.slice(0, 4);
-      m = `${year}-${String(MONTHS.indexOf(named[1]) + 1).padStart(2, "0")}`;
+      const idx = MONTHS.indexOf(named[1].slice(0, 3));
+      let year = Number(named[2] ?? month.slice(0, 4));
+      // "profit in November" asked in March means last November, not a
+      // month that hasn't happened yet.
+      if (!named[2] && idx + 1 > Number(month.slice(5, 7))) year -= 1;
+      m = `${year}-${String(idx + 1).padStart(2, "0")}`;
     }
     const iso = q.match(/\b(\d{4})-(0[1-9]|1[0-2])\b/);
     if (iso) m = `${iso[1]}-${iso[2]}`;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { syncDerivedAlerts } from "../accounts/alerts";
 import { db } from "../db";
 import { computeCosting, ordersInProgressIn, ordersRealisedIn } from "../accounts/costing";
 import { machineOutput, machineQuality } from "../accounts/machine-output";
@@ -187,7 +188,7 @@ export const TOOLS = [
       const mm = m ?? currentMonthKey();
       const { start, end } = monthRange(mm);
       const workers = await db.worker.findMany({
-        include: { attendance: { where: { date: { gte: start, lt: end } }, select: { status: true } } },
+        include: { attendance: { where: { date: { gte: start, lt: end } }, select: { status: true, dailyWage: true } } },
         orderBy: { name: "asc" },
       });
       const rows = workers.map((w) => {
@@ -199,7 +200,7 @@ export const TOOLS = [
           present: n("present"),
           halfDay: n("half_day"),
           absent: n("absent"),
-          wages: r2(w.attendance.reduce((s, a) => s + w.dailyWage * (WAGE_FACTOR[a.status as AttendanceStatus] ?? 0), 0)),
+          wages: r2(w.attendance.reduce((s, a) => s + (a.dailyWage ?? w.dailyWage) * (WAGE_FACTOR[a.status as AttendanceStatus] ?? 0), 0)),
         };
       });
       return {
@@ -213,13 +214,20 @@ export const TOOLS = [
   }),
   tool({
     name: "ordersOverview",
-    description: "List of orders with status, buyer, quantity, price per metre and deadline. Optional status filter (NEW, CONFIRMED, IN_PRODUCTION, QC, READY, DISPATCHED, CLOSED).",
+    description:
+      "List of orders with status, production/QC/dispatch/payment status, buyer, quantity, price per metre and deadline. Optional filters: status (NEW, CONFIRMED, IN_PRODUCTION, QC, READY, DISPATCHED, CLOSED), dispatchStatus (NOT_DISPATCHED, PARTIALLY_DISPATCHED, FULLY_DISPATCHED), paymentStatus (UNPAID, PARTIAL, PAID).",
     args: z.object({
       status: z.enum(["NEW", "CONFIRMED", "IN_PRODUCTION", "QC", "READY", "DISPATCHED", "CLOSED"]).optional(),
+      dispatchStatus: z.enum(["NOT_DISPATCHED", "PARTIALLY_DISPATCHED", "FULLY_DISPATCHED"]).optional(),
+      paymentStatus: z.enum(["UNPAID", "PARTIAL", "PAID"]).optional(),
     }),
-    run: async ({ status }) => {
+    run: async ({ status, dispatchStatus, paymentStatus }) => {
       const orders = await db.order.findMany({
-        where: status ? { status } : {},
+        where: {
+          ...(status ? { status } : {}),
+          ...(dispatchStatus ? { dispatchStatus } : {}),
+          ...(paymentStatus ? { paymentStatus } : {}),
+        },
         include: { buyer: { select: { name: true } } },
         orderBy: { deadline: "asc" },
       });
@@ -229,6 +237,10 @@ export const TOOLS = [
           orderNo: o.orderNo,
           buyer: o.buyer.name,
           status: o.status,
+          productionStatus: o.productionStatus,
+          qcStatus: o.qcStatus,
+          dispatchStatus: o.dispatchStatus,
+          paymentStatus: o.paymentStatus,
           fabric: `${o.fabricType} ${o.colour} ${o.gsm} GSM`,
           qtyMetres: o.qtyMetres,
           pricePerMetre: o.pricePerMetre,
@@ -242,13 +254,18 @@ export const TOOLS = [
     description: "Unread alerts (low stock, breakdowns, delay risk, orders ready, payments) newest first.",
     args: z.object({ limit: z.number().int().min(1).max(50).optional() }),
     run: async ({ limit }) => {
-      const alerts = await db.notification.findMany({
-        where: { read: false },
-        orderBy: { createdAt: "desc" },
-        take: limit ?? 10,
-        select: { type: true, message: true, severity: true, createdAt: true },
-      });
-      return { unread: alerts.length, alerts: alerts.map((a) => ({ ...a, type: a.type.split(":")[0] })) };
+      // Raise/clear the derived alerts first so the answer matches the bell.
+      await syncDerivedAlerts();
+      const [alerts, unread] = await Promise.all([
+        db.notification.findMany({
+          where: { read: false },
+          orderBy: { createdAt: "desc" },
+          take: limit ?? 10,
+          select: { type: true, message: true, severity: true, createdAt: true },
+        }),
+        db.notification.count({ where: { read: false } }),
+      ]);
+      return { unread, shown: alerts.length, alerts: alerts.map((a) => ({ ...a, type: a.type.split(":")[0] })) };
     },
   }),
 ] as const;
