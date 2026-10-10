@@ -3,16 +3,25 @@
 
 export const OLLAMA_URL = (process.env.OLLAMA_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
+// Separate from OLLAMA_MODEL: the text assistant model (e.g. llama3.1) can't
+// read images. Reading a handwritten register needs a multimodal model.
+export const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? "llava";
 const TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 90_000);
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Base64-encoded image data (no data: prefix), vision models only. */
+  images?: string[];
 }
 
 export class OllamaUnavailableError extends Error {}
 
-export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean } = {}): Promise<string> {
+async function ollamaRequest(
+  model: string,
+  messages: ChatMessage[],
+  opts: { json?: boolean } = {},
+): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
@@ -21,7 +30,7 @@ export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model,
         messages,
         stream: false,
         ...(opts.json ? { format: "json" } : {}),
@@ -38,7 +47,7 @@ export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     if (res.status === 404 && /model/i.test(body)) {
-      throw new OllamaUnavailableError(`Model "${OLLAMA_MODEL}" is not installed in Ollama. Run: ollama pull ${OLLAMA_MODEL}`);
+      throw new OllamaUnavailableError(`Model "${model}" is not installed in Ollama. Run: ollama pull ${model}`);
     }
     throw new OllamaUnavailableError(`Ollama returned ${res.status}: ${body.slice(0, 200)}`);
   }
@@ -46,4 +55,13 @@ export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean
   const content = json.message?.content;
   if (typeof content !== "string") throw new OllamaUnavailableError("Ollama returned no message content.");
   return content;
+}
+
+export async function ollamaChat(messages: ChatMessage[], opts: { json?: boolean } = {}): Promise<string> {
+  return ollamaRequest(OLLAMA_MODEL, messages, opts);
+}
+
+/** Like ollamaChat, but against the vision-capable model for image input. */
+export async function ollamaVision(messages: ChatMessage[], opts: { json?: boolean } = {}): Promise<string> {
+  return ollamaRequest(OLLAMA_VISION_MODEL, messages, opts);
 }

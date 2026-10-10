@@ -336,3 +336,77 @@ UI kit); the other modules were adapted to it. No teammate's feature was removed
 - Order QC → READY is still a manual status change (Module 1's order page).
 - Module 1's `npm run seed` is not idempotent (re-running duplicates
   suppliers/buyers/orders); reset the DB before re-seeding.
+
+---
+
+## Data Import — scan handwritten registers + SQL file import (Chezhil, Claude)
+
+New post-integration feature, not part of the original 4-way split: a
+request to bring in legacy records (handwritten stock/attendance/order
+registers, and simple SQL dumps from an old system) without hand-retyping
+them. Owner-only, under `/import`.
+
+### What AI generated
+Essentially all of it:
+- `src/lib/import/sql-parser.ts` — a small hand-rolled parser for
+  `CREATE TABLE` / `INSERT INTO ... VALUES (...), (...);` statements (not a
+  full SQL grammar on purpose — real small-business dumps are simple, and a
+  mis-parse of something exotic is worse than refusing to parse it).
+- `src/lib/import/targets.ts` — the four supported record types (yarn
+  intake, attendance, expenses, orders), each resolving related records by
+  name (supplier/buyer/worker/yarn type) and creating them if new, rather
+  than requiring the person to already have ids.
+- `src/lib/import/ocr.ts` + an extension to `src/lib/assistant/ollama.ts`
+  (`ollamaVision` / `OLLAMA_VISION_MODEL`) — sends a photo to a local
+  multimodal model (default `llava`, separate from the text assistant's
+  `llama3.1`) with a register-specific prompt, parses the JSON rows back out.
+- Three new API routes (`sql-parse`, `ocr`, `commit`) plus a read-only
+  `targets` route, and the `src/components/import/*` review UI (editable
+  grid, column-mapping with best-effort auto-guessing, per-row commit
+  results) — both the photo path and the SQL path land in the same review
+  grid and the same commit endpoint before anything touches the database.
+
+### What a human reviewed/changed
+- Grounded the design in a web search first (see conversation) rather than
+  guessing register formats: confirmed real Indian mill attendance registers
+  follow Form IX / Form IV shapes (name, shift, daily status, wages) and that
+  "simple SQL files" in this space realistically means arbitrary
+  `CREATE TABLE`/`INSERT` dumps with varying column names — which is why the
+  importer is a generic mapper rather than one hardcoded schema.
+- The first version of the column auto-mapper used substring matching on
+  concatenated field names and missed real cases (`qty_kg` → "Quantity
+  received (kg)", `received_on` → "Date received") because the words were in
+  different positions. Rewrote it as token-set overlap with a small synonym
+  table (qty→quantity, no→number, etc.) after verifying the failure in the
+  browser, not just by reading the code.
+- Verified end-to-end for real, not just type-checked: parsed a sample
+  legacy `yarn_stock` SQL dump through the UI into a real new YarnType
+  ("Cotton 40s — Cream", 275.5kg across 2 lots) visible on the Inventory
+  page; committed attendance/expense/order rows via the API directly,
+  including common register shorthand (`P`/`HD`/`A` for status, `A`/
+  `Morning` for shift) and a mixed batch of valid/invalid rows to confirm one
+  bad row doesn't block the others; confirmed non-owner and unauthenticated
+  requests get 403/401; confirmed every import shows up in the Audit Trail
+  tagged "Import" so it's distinguishable from a manual entry.
+- Could not test the photo-scanning path against a real model: this
+  environment has Ollama installed but only a text model (`llama3.2:3b`), no
+  vision model. Verified the failure path instead — `ollamaVision` correctly
+  reports `Model "llava" is not installed in Ollama. Run: ollama pull llava`
+  rather than hanging or crashing, both from the lib function directly and
+  through the actual API route (503 with that message). **Before relying on
+  the scanner, pull a vision model** (`ollama pull llava`, or set
+  `OLLAMA_VISION_MODEL` to another multimodal model you have) **and test it
+  against a real photo of a register** — the JSON-extraction prompt in
+  `src/lib/import/ocr.ts` has never been validated against actual model
+  output, only against the "model missing" error path.
+
+### Known gaps / honest status
+- The SQL parser handles typical dumps but not every SQL dialect quirk
+  (e.g. MySQL `ON DUPLICATE KEY UPDATE`, multi-row `INSERT ... SELECT`,
+  stored generated columns). It skips what it can't parse and reports a
+  warning rather than guessing.
+- New supplier/buyer records created implicitly during import get a
+  placeholder contact ("Unknown (imported)") — worth a follow-up pass in
+  Suppliers/Orders to fill in real contact details.
+- No dedupe beyond exact case-sensitive name match on resolve-or-create;
+  "Himalaya Yarns" and "himalaya yarns" would currently become two suppliers.
