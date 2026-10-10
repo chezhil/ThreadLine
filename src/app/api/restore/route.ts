@@ -9,6 +9,14 @@ import { snapshotTo, validateDatabaseFile } from "@/lib/quality/db-snapshot";
 const MAX_BYTES = 200 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
+  // File-swap restore only applies to the SQLite file layout; on Postgres
+  // (Supabase) restore via `pg_restore` / the Supabase dashboard instead.
+  if (!process.env.DATABASE_URL?.startsWith("file:")) {
+    return NextResponse.json(
+      { error: "This instance runs on Postgres — use your database provider's restore tooling (e.g. Supabase dashboard or pg_restore) instead." },
+      { status: 501 },
+    );
+  }
   // Replaces the whole database — owner only.
   const actor = await qualityActor("owner");
   if ("response" in actor) return actor.response;

@@ -5,6 +5,14 @@ import { sqliteFilePath } from "@/lib/quality/db-file";
 import { snapshotTo } from "@/lib/quality/db-snapshot";
 
 export async function GET(_req: NextRequest) {
+  // File-level backup only applies to the SQLite file layout; on Postgres
+  // (Supabase) use `pg_dump` / Supabase's own backup tooling instead.
+  if (!process.env.DATABASE_URL?.startsWith("file:")) {
+    return NextResponse.json(
+      { error: "This instance runs on Postgres — use your database provider's backup tooling (e.g. Supabase dashboard or pg_dump) instead." },
+      { status: 501 },
+    );
+  }
   // A full copy of the database (incl. password hashes) — owner only.
   const actor = await qualityActor("owner");
   if ("response" in actor) return actor.response;
