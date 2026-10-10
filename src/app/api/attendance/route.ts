@@ -39,12 +39,13 @@ export async function GET(req: NextRequest) {
 
   const [workers, marks] = await Promise.all([
     db.worker.findMany({ orderBy: { name: "asc" } }),
-    db.attendance.findMany({ where: { date: { gte: start, lt: end } }, select: { workerId: true, status: true, date: true } }),
+    db.attendance.findMany({ where: { date: { gte: start, lt: end } }, select: { workerId: true, status: true, date: true, dailyWage: true } }),
   ]);
   const rows = workers.map((w) => {
     const mine = marks.filter((m) => m.workerId === w.id);
     const count = (s: AttendanceStatus) => mine.filter((m) => m.status === s).length;
-    const wages = mine.reduce((s, m) => s + w.dailyWage * (WAGE_FACTOR[m.status as AttendanceStatus] ?? 0), 0);
+    // Each mark at the wage that applied that day (a raise isn't retroactive).
+    const wages = mine.reduce((s, m) => s + (m.dailyWage ?? w.dailyWage) * (WAGE_FACTOR[m.status as AttendanceStatus] ?? 0), 0);
     return {
       workerId: w.id,
       name: w.name,
@@ -83,10 +84,11 @@ export async function POST(req: NextRequest) {
   const workerIds = entries.map((e) => e.workerId);
   const machineIds = [...new Set(entries.map((e) => e.machineId).filter((m): m is string => !!m))];
   const [workers, machines] = await Promise.all([
-    db.worker.findMany({ where: { id: { in: workerIds } }, select: { id: true } }),
+    db.worker.findMany({ where: { id: { in: workerIds } }, select: { id: true, dailyWage: true } }),
     db.machine.findMany({ where: { id: { in: machineIds } }, select: { id: true } }),
   ]);
   const knownWorkers = new Set(workers.map((w) => w.id));
+  const wageOf = new Map(workers.map((w) => [w.id, w.dailyWage]));
   const knownMachines = new Set(machines.map((m) => m.id));
   const errors: Record<string, string[]> = {};
   entries.forEach((e, i) => {
@@ -96,15 +98,18 @@ export async function POST(req: NextRequest) {
   if (Object.keys(errors).length) return fieldErrorResponse(errors);
 
   const { start, end } = dayRange(istDateKey(date));
-  const existing = await db.attendance.findMany({
-    where: { workerId: { in: workerIds }, shift, date: { gte: start, lt: end } },
-  });
-  const byWorker = new Map(existing.map((a) => [a.workerId, a]));
 
+  // The existing-marks lookup runs inside the write transaction (serialised
+  // by writeTransaction), and (workerId, date, shift) is unique, so two saves
+  // of the same muster at once update one row instead of marking twice.
   const audits: Parameters<typeof logAudit>[] = [];
   let created = 0;
   let updated = 0;
   await writeTransaction(async (tx) => {
+    const existing = await tx.attendance.findMany({
+      where: { workerId: { in: workerIds }, shift, date: { gte: start, lt: end } },
+    });
+    const byWorker = new Map(existing.map((a) => [a.workerId, a]));
     for (const e of entries) {
       const prev = byWorker.get(e.workerId);
       if (prev) {
@@ -117,8 +122,9 @@ export async function POST(req: NextRequest) {
         updated++;
       } else {
         const next = await tx.attendance.create({
-          data: { workerId: e.workerId, date, shift, status: e.status, machineId: e.machineId },
+          data: { workerId: e.workerId, date, shift, status: e.status, machineId: e.machineId, dailyWage: wageOf.get(e.workerId) },
         });
+        byWorker.set(e.workerId, next);
         audits.push(["Attendance", next.id, "create", null, next, user.id]);
         created++;
       }

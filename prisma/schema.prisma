@@ -11,12 +11,13 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  name         String
-  role         String // owner | storekeeper | floor_supervisor | qc_inspector
-  passwordHash String
-  createdAt    DateTime @default(now())
-  sessions     Session[]
+  id                String             @id @default(uuid())
+  name              String
+  role              String // owner | storekeeper | floor_supervisor | qc_inspector
+  passwordHash      String
+  createdAt         DateTime           @default(now())
+  sessions          Session[]
+  notificationReads NotificationRead[]
 }
 
 model Session {
@@ -39,12 +40,12 @@ model Supplier {
 }
 
 model Buyer {
-  id        String     @id @default(uuid())
-  name      String
-  contact   String
-  gstin     String?
-  address   String?
-  orders    Order[]
+  id         String     @id @default(uuid())
+  name       String
+  contact    String
+  gstin      String?
+  address    String?
+  orders     Order[]
   dispatches Dispatch[]
 }
 
@@ -230,6 +231,12 @@ model Attendance {
   shift     String
   status    String // present|absent|half_day
   machineId String?
+  // The worker's daily wage when this mark was made, so a later raise doesn't
+  // rewrite past months' wages and costing. Null only on rows written before
+  // the column existed (backfilled by the migration).
+  dailyWage Float?
+
+  @@unique([workerId, date, shift])
 }
 
 model Expense {
@@ -243,12 +250,27 @@ model Expense {
 }
 
 model Notification {
-  id        String   @id @default(uuid())
+  id        String             @id @default(uuid())
   type      String
   message   String
   severity  String // info|warning|critical
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  read      Boolean            @default(false)
+  createdAt DateTime           @default(now())
+  reads     NotificationRead[]
+}
+
+// Per-user "I've seen this" marks. Notification.read stays the mill-wide
+// "resolved" flag (derived alerts set it when their condition clears); one
+// user marking alerts read no longer hides them from everyone else.
+model NotificationRead {
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt         DateTime     @default(now())
+
+  @@id([notificationId, userId])
+  @@index([userId])
 }
 
 model AuditLog {
@@ -265,11 +287,11 @@ model AuditLog {
 model AlertDelivery {
   id             String    @id @default(uuid())
   notificationId String?
-  channel        String    // WHATSAPP | EMAIL | SMS | IN_APP
-  recipient      String    // phone number or email
+  channel        String // WHATSAPP | EMAIL | SMS | IN_APP
+  recipient      String // phone number or email
   templateName   String?
-  payload        String    // JSON stringified payload
-  status         String    @default("PENDING") // PENDING | SENT | FAILED | RETRYING
+  payload        String // JSON stringified payload
+  status         String    @default("PENDING") // PENDING | SENDING | SENT | FAILED | RETRYING
   attempts       Int       @default(0)
   maxAttempts    Int       @default(3)
   lastError      String?

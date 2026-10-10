@@ -55,7 +55,7 @@ export async function monthSummary(
     db.expense.findMany({ where: { date: inMonth }, select: { category: true, amount: true } }),
     db.attendance.findMany({
       where: { date: inMonth },
-      select: { workerId: true, status: true, worker: { select: { dailyWage: true } } },
+      select: { workerId: true, status: true, dailyWage: true, worker: { select: { dailyWage: true } } },
     }),
     db.invoice.findMany({ where: { createdAt: inMonth }, select: { gst: true, total: true } }),
     db.invoice.findMany({ select: { total: true, payments: { select: { amount: true } } } }),
@@ -79,7 +79,7 @@ export async function monthSummary(
   let halfDays = 0;
   let absentDays = 0;
   for (const a of attendance) {
-    accrued += a.worker.dailyWage * (WAGE_FACTOR[a.status as AttendanceStatus] ?? 0);
+    accrued += (a.dailyWage ?? a.worker.dailyWage) * (WAGE_FACTOR[a.status as AttendanceStatus] ?? 0);
     if (a.status === "present") presentDays++;
     else if (a.status === "half_day") halfDays++;
     else absentDays++;
