@@ -7,6 +7,7 @@ import { emit, RealtimeEvents } from "@/lib/realtime";
 import { qualityActor } from "@/lib/quality/auth";
 import { computeInvoiceTotals } from "@/lib/billing";
 import { generateInvoiceNo } from "@/lib/order-numbers";
+import { withRetry } from "@/lib/concurrency";
 
 
 export async function GET(req: NextRequest) {
@@ -130,71 +131,74 @@ export async function POST(req: NextRequest) {
     // Determine primary order for invoice linking
     const primaryOrder = rolls[0].order;
 
-    // Link the order's GST invoice, creating it the way Module 1's
-    // POST /api/invoices does (order qty × price, shared GST rate).
-    let invoiceId: string | null = null;
-    let invoice = await db.invoice.findFirst({
-      where: { orderId: primaryOrder.id },
-    });
-    if (!invoice) {
-      const subtotal = primaryOrder.qtyMetres * primaryOrder.pricePerMetre;
-      const { gst, total } = computeInvoiceTotals(subtotal);
-      invoice = await db.invoice.create({
-        data: {
-          invoiceNo: await generateInvoiceNo(),
-          orderId: primaryOrder.id,
-          buyerId,
-          subtotal,
-          gst,
-          total,
-          status: "ISSUED",
-        },
-      });
+    // Invoice find-or-create AND the dispatch/roll-claiming now share one
+    // transaction (and a retry wrapper) — previously the invoice lookup ran
+    // before the transaction, so two concurrent dispatches for the same
+    // uninvoiced order could both decide to create one (duplicate GST
+    // invoices for one order, or a crash on the invoiceNo unique constraint).
+    // ordersDispatched/invoiceCreated are declared inside so a retried
+    // attempt starts clean instead of re-using a partial prior attempt's.
+    const { dispatch, invoiceId, invoice, invoiceCreated, ordersDispatched } = await withRetry(() =>
+      db.$transaction(async (tx) => {
+        let invoice = await tx.invoice.findFirst({ where: { orderId: primaryOrder.id } });
+        let invoiceCreated = false;
+        if (!invoice) {
+          const subtotal = primaryOrder.qtyMetres * primaryOrder.pricePerMetre;
+          const { gst, total } = computeInvoiceTotals(subtotal);
+          invoice = await tx.invoice.create({
+            data: {
+              invoiceNo: await generateInvoiceNo(tx),
+              orderId: primaryOrder.id,
+              buyerId,
+              subtotal,
+              gst,
+              total,
+              status: "ISSUED",
+            },
+          });
+          invoiceCreated = true;
+        }
+        const invoiceId = invoice.id;
+
+        const newDispatch = await tx.dispatch.create({
+          data: { buyerId, truckNo, invoiceId },
+        });
+
+        // Update all rolls (re-checking inside the transaction so two
+        // concurrent dispatches can't both claim the same roll)
+        const claimed = await tx.roll.updateMany({
+          where: { id: { in: rollIds }, dispatchId: null, qcStatus: "PASS" },
+          data: { dispatchId: newDispatch.id },
+        });
+        if (claimed.count !== rollIds.length) {
+          throw new DispatchConflict();
+        }
+
+        // Update Order status to DISPATCHED once every roll that can still ship
+        // has shipped (rejected rolls never ship, so they don't hold it back)
+        const ordersDispatched: { id: string; from: string }[] = [];
+        const distinctOrderIds = Array.from(new Set(rolls.map((r) => r.orderId)));
+        for (const ordId of distinctOrderIds) {
+          const remainingUndispatched = await tx.roll.count({
+            where: { orderId: ordId, dispatchId: null, qcStatus: { not: "REJECT" } },
+          });
+          const order = rolls.find((r) => r.orderId === ordId)!.order;
+          if (remainingUndispatched === 0 && order.status !== "DISPATCHED" && order.status !== "CLOSED") {
+            await tx.order.update({
+              where: { id: ordId },
+              data: { status: "DISPATCHED" },
+            });
+            ordersDispatched.push({ id: ordId, from: order.status });
+          }
+        }
+
+        return { dispatch: newDispatch, invoiceId, invoice, invoiceCreated, ordersDispatched };
+      }),
+    );
+
+    if (invoiceCreated) {
       await logAudit("Invoice", invoice.id, "create", null, invoice, actor.user.id);
     }
-    invoiceId = invoice.id;
-
-    // Atomically create Dispatch and mark all rolls with dispatchId
-    const ordersDispatched: { id: string; from: string }[] = [];
-    const dispatch = await db.$transaction(async (tx) => {
-      const newDispatch = await tx.dispatch.create({
-        data: {
-          buyerId,
-          truckNo,
-          invoiceId,
-        },
-      });
-
-      // Update all rolls (re-checking inside the transaction so two
-      // concurrent dispatches can't both claim the same roll)
-      const claimed = await tx.roll.updateMany({
-        where: { id: { in: rollIds }, dispatchId: null, qcStatus: "PASS" },
-        data: { dispatchId: newDispatch.id },
-      });
-      if (claimed.count !== rollIds.length) {
-        throw new DispatchConflict();
-      }
-
-      // Update Order status to DISPATCHED once every roll that can still ship
-      // has shipped (rejected rolls never ship, so they don't hold it back)
-      const distinctOrderIds = Array.from(new Set(rolls.map((r) => r.orderId)));
-      for (const ordId of distinctOrderIds) {
-        const remainingUndispatched = await tx.roll.count({
-          where: { orderId: ordId, dispatchId: null, qcStatus: { not: "REJECT" } },
-        });
-        const order = rolls.find((r) => r.orderId === ordId)!.order;
-        if (remainingUndispatched === 0 && order.status !== "DISPATCHED" && order.status !== "CLOSED") {
-          await tx.order.update({
-            where: { id: ordId },
-            data: { status: "DISPATCHED" },
-          });
-          ordersDispatched.push({ id: ordId, from: order.status });
-        }
-      }
-
-      return newDispatch;
-    });
-
     await logAudit(
       "Dispatch",
       dispatch.id,

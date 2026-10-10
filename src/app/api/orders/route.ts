@@ -5,6 +5,7 @@ import { orderCreateSchema } from "@/lib/validation/order";
 import { generateOrderNo, generateTrackingToken } from "@/lib/order-numbers";
 import { logAudit } from "@/lib/audit";
 import { emit, RealtimeEvents } from "@/lib/realtime";
+import { withRetry } from "@/lib/concurrency";
 
 export async function GET() {
   const user = await requireRole("owner");
@@ -35,19 +36,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ fieldErrors: { buyerId: ["Buyer not found"] } }, { status: 400 });
   }
 
-  const [orderNo, trackingToken] = await Promise.all([
-    generateOrderNo(),
-    Promise.resolve(generateTrackingToken()),
-  ]);
-
-  const order = await db.order.create({
-    data: {
-      ...parsed.data,
-      orderNo,
-      trackingToken,
-      status: "NEW",
-    },
-  });
+  // Order numbers are "count of existing orders + 1" — two concurrent order
+  // creations could otherwise compute the same number. The transaction makes
+  // one attempt atomic (SQLite serialises the write), withRetry re-attempts
+  // from scratch (fresh count) if it still collides.
+  const trackingToken = generateTrackingToken();
+  const order = await withRetry(() =>
+    db.$transaction(async (tx) => {
+      const orderNo = await generateOrderNo(tx);
+      return tx.order.create({
+        data: { ...parsed.data, orderNo, trackingToken, status: "NEW" },
+      });
+    }),
+  );
 
   await logAudit("Order", order.id, "create", null, order, user.id);
   emit(RealtimeEvents.OrderStatus, { orderId: order.id, status: order.status });

@@ -336,3 +336,59 @@ UI kit); the other modules were adapted to it. No teammate's feature was removed
 - Order QC → READY is still a manual status change (Module 1's order page).
 - Module 1's `npm run seed` is not idempotent (re-running duplicates
   suppliers/buyers/orders); reset the DB before re-seeding.
+
+---
+
+## Concurrency safety (Chezhil, Claude)
+
+Prompted by the user: "two people can't book the last seat" (a ticket-
+booking concurrency pattern) applied to this app — two supervisors
+reserving the same yarn lot, two scans dispatching the same roll, two
+concurrent requests numbering the same invoice. Full write-up of this and 7
+related hardening items in `../HARDENING_ADDENDUM.md`; this section covers
+only what got built: item 1 of that file.
+
+### What AI generated
+- `src/lib/concurrency.ts` (`withRetry`) and the fix itself: moved
+  `reserve-yarn`'s stock check inside its transaction (was reading
+  `qtyRemainingKg` before the transaction that decremented it), gave
+  `generateOrderNo`/`generateInvoiceNo` an optional transaction-client
+  parameter so the count-then-format happens inside the same `db.$transaction`
+  as the row it numbers, and folded the dispatch route's invoice
+  find-or-create into its existing roll-claiming transaction (it previously
+  ran before that transaction, unprotected).
+- `scripts/verify-concurrency.ts` — fires real concurrent HTTP requests at a
+  running server for all three paths and asserts the DB ended up consistent.
+
+### What a human reviewed/changed
+- **Found the dispatch/invoice bug by reading the code, not by assumption**:
+  Module 3's roll-claiming inside `db.$transaction` was already correct
+  (atomic `updateMany` + affected-count check — the right pattern). But its
+  invoice find-or-create sat *before* that transaction, unprotected. Read
+  the actual file before fixing anything, rather than assuming "transactions
+  are used somewhere so it's probably fine."
+- **Proved the bugs were real, not hypothetical, before claiming a fix**:
+  temporarily reverted the three route files to `main`'s original versions,
+  reran the exact same test script, and confirmed it failed concrete and
+  ugly — yarn stock went to **-50kg** across 5 concurrent reservations of a
+  100kg lot, and 8 concurrent invoice requests for one order produced **4
+  duplicate invoices** (the other 4 crashed with unique-constraint 500s).
+  Then restored the fix and confirmed the same script now passes 11/11 on a
+  fresh seed. Both runs are reproducible with the commands in the addendum.
+- `withRetry`'s retry condition is narrow on purpose (Prisma error codes
+  P2002/P2034 and SQLite's "database is locked") — it must not retry a
+  legitimate business rejection like insufficient stock, which the code
+  checks for explicitly (`InsufficientStock` is re-thrown immediately, not
+  retried).
+
+### Known gaps / honest status
+- `withRetry`'s correctness here rests on SQLite serialising concurrent
+  write transactions from one process; this has not been tested against a
+  Postgres deployment, where the isolation-level defaults and conflict
+  errors differ.
+- Items 2-8 of the addendum (split order status, an immutable ledger,
+  approval workflows, the rest of the failure-case matrix, an alerts
+  outbox, a load test, backup/restore round-trip test, CSV export) are
+  scoped in detail but **not built** — see the addendum for why each one was
+  judged too invasive to rush blind into a shared branch, and what order to
+  tackle them in.
