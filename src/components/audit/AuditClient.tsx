@@ -105,14 +105,14 @@ export function AuditClient() {
     <div className="flex flex-col gap-4">
       <PageTitle title="Audit trail" subtitle="Who changed what, and when: stock intake, QC results, order and machine status, payments, attendance and more." />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
         <div className="lg:col-span-2">
           <Input aria-label="Search" placeholder="Search id or value (e.g. EVR-2610)" value={q} onChange={(e) => resetPage(setQ)(e.target.value)} className="w-full" />
         </div>
         <Select aria-label="Entity" value={entity} onChange={(e) => resetPage(setEntity)(e.target.value)} options={[{ value: "", label: "All records" }, ...(data?.filters.entities ?? []).map((x) => ({ value: x, label: x }))]} />
         <Select aria-label="Action" value={action} onChange={(e) => resetPage(setAction)(e.target.value)} options={[{ value: "", label: "All actions" }, ...(data?.filters.actions ?? []).map((x) => ({ value: x, label: x.replace(/_/g, " ") }))]} />
         <Select aria-label="User" value={userId} onChange={(e) => resetPage(setUserId)(e.target.value)} options={[{ value: "", label: "Anyone" }, ...(data?.filters.users ?? []).map((u) => ({ value: u.id, label: u.name }))]} />
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 lg:col-span-2">
           <Input aria-label="From date" type="date" value={from} onChange={(e) => resetPage(setFrom)(e.target.value)} />
           <Input aria-label="To date" type="date" value={to} onChange={(e) => resetPage(setTo)(e.target.value)} />
         </div>

@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen w-full">
       <Sidebar role={user.role} userName={user.name} />
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-12 items-center justify-between gap-2 border-b border-border bg-white px-4 py-2">
           <Breadcrumbs />
           <div className="ml-auto">

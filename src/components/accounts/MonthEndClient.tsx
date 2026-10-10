@@ -65,7 +65,7 @@ export function MonthEndClient() {
             <Stat label="Wages earned" value={inr(data.wages.accrued)} hint={`${data.wages.workers} worker(s) marked`} />
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2 *:min-w-0">
             <Card>
               <CardHeader title="Profit & loss (accrual)" action={<Link href="/accounts/costing" className="text-xs font-medium text-brand hover:underline">Per order →</Link>} />
               <Line label={`Revenue — ${data.pnl.ordersRealised} order(s) invoiced`} hint="qty × price per metre, ex-GST" value={inr(data.pnl.revenue)} />

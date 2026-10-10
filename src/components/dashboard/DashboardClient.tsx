@@ -67,7 +67,7 @@ export function DashboardClient() {
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2 *:min-w-0">
         <ProfitPanel data={costs.data} loading={costs.loading} error={costs.error} retry={costs.refetch} />
         <DefectsPanel />
         <MachinePanel data={output.data} loading={output.loading} error={output.error} retry={output.refetch} />
@@ -214,9 +214,20 @@ function MachinePanel({ data, loading, error, retry }: { data: MachineOutput | n
                   <tr key={m.machineId}>
                     <td className="whitespace-nowrap py-1.5 pr-2 font-medium">{m.name}</td>
                     <td className="py-1.5 pr-2"><Badge status={m.status} /></td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums">{num(m.todayOutput)} m</td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums">{num(m.periodOutput)} m</td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums" title={`${m.shiftsLogged} shift(s) logged`}>{pct(m.utilisationPct, 0)}</td>
+                    <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums">{num(m.todayOutput)} m</td>
+                    <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums">{num(m.periodOutput)} m</td>
+                    <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums" title={`${m.shiftsLogged} shift(s) logged`}>
+                      {m.utilisationPct != null && m.utilisationPct > 100 ? (
+                        <span
+                          className="text-amber-700"
+                          title={`Logged ${num(m.periodOutput)} m in ${m.shiftsLogged} shift(s), above the rated ${num(m.capacityMetresPerShift)} m/shift. Check the production log or the machine's capacity.`}
+                        >
+                          over rated
+                        </span>
+                      ) : (
+                        pct(m.utilisationPct, 0)
+                      )}
+                    </td>
                     <td className="py-1.5">
                       <div className="flex h-6 items-end gap-0.5" aria-label={`Daily output for ${m.name}`}>
                         {m.daily.map((d) => (

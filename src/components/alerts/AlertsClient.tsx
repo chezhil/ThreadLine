@@ -82,7 +82,7 @@ export function AlertsClient() {
       {loading && !data && <Loading />}
 
       {data && (
-        <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
+        <div className="grid gap-4 lg:grid-cols-[1fr_22rem] *:min-w-0">
           <div className="flex flex-col gap-2">
             {rows.length === 0 ? (
               <EmptyState title={show === "unread" ? "No unread alerts" : "No alerts"} description="New alerts appear here the moment any module raises them." />

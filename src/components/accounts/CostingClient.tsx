@@ -201,7 +201,7 @@ function OrderBreakdown({ orderId }: { orderId: string }) {
           </div>
           <div>
             <p className="text-xs text-gray-500">{o.stage === "final" ? "Profit" : "Value − cost so far"}</p>
-            <p className={`font-semibold tabular-nums ${o.profit < 0 ? "text-red-700" : "text-green-700"}`}>{inr(o.profit)}</p>
+            <p className={`font-semibold tabular-nums ${o.stage !== "final" ? "text-foreground" : o.profit < 0 ? "text-red-700" : "text-green-700"}`}>{inr(o.profit)}</p>
           </div>
         </div>
       </Card>
