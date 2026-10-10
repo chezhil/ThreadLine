@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useRealtimeEvent } from "@/lib/useRealtime";
-import { RealtimeEvents } from "@/lib/realtime";
+import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import { Button } from "@/components/quality/ui/Button";
 import { Badge } from "@/components/quality/ui/Badge";
 import { Card } from "@/components/quality/ui/Card";
@@ -40,6 +40,10 @@ export default function DispatchPage() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [editingDispatchId, setEditingDispatchId] = useState<string | null>(null);
+  const [editTruckNo, setEditTruckNo] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -93,6 +97,32 @@ export default function DispatchPage() {
   useRealtimeEvent(RealtimeEvents.DispatchCompleted, () => {
     loadData();
   });
+  useRealtimeEvent<DataChange>(RealtimeEvents.DataChanged, (change) => {
+    if (change.entity === "Dispatch") loadData();
+  });
+
+  async function saveTruckNo(dispatchId: string) {
+    setEditError(null);
+    if (!editTruckNo.trim()) {
+      setEditError("Enter a truck number");
+      return;
+    }
+    setEditBusy(true);
+    const res = await fetch(`/api/dispatches/${dispatchId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ truckNo: editTruckNo.trim() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    setEditBusy(false);
+    if (!res.ok) {
+      const msg = typeof body?.fieldErrors === "object" ? Object.values(body.fieldErrors)[0] : body?.error;
+      setEditError((Array.isArray(msg) ? msg[0] : msg) ?? "Couldn't save the truck number");
+      return;
+    }
+    setEditingDispatchId(null);
+    loadData();
+  }
 
   const eligibleRollsForBuyer = availableRolls.filter(
     (r) => r.order?.buyerId === selectedBuyerId
@@ -531,6 +561,7 @@ export default function DispatchPage() {
                   <TableHead>Rolls Loaded</TableHead>
                   <TableHead>Total Metres</TableHead>
                   <TableHead>Invoice ID</TableHead>
+                  <TableHead>{""}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -539,10 +570,23 @@ export default function DispatchPage() {
                     (acc: number, r: any) => acc + (r.lengthMetres || 0),
                     0
                   );
+                  const isEditing = editingDispatchId === disp.id;
                   return (
                     <TableRow key={disp.id}>
                       <TableCell className="font-bold text-slate-900">
-                        {disp.truckNo}
+                        {isEditing ? (
+                          <div className="flex flex-col gap-1">
+                            <Input
+                              value={editTruckNo}
+                              onChange={(e) => setEditTruckNo(e.target.value)}
+                              className="w-32"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            {editError && <span className="text-[11px] text-rose-600 font-medium">{editError}</span>}
+                          </div>
+                        ) : (
+                          disp.truckNo
+                        )}
                       </TableCell>
                       <TableCell className="font-medium text-slate-800">
                         {disp.rolls?.[0]?.order?.buyer?.name || "Direct Buyer"}
@@ -558,6 +602,31 @@ export default function DispatchPage() {
                       </TableCell>
                       <TableCell className="font-mono text-xs text-slate-500">
                         {disp.invoiceId || "Issued"}
+                      </TableCell>
+                      <TableCell>
+                        {isEditing ? (
+                          <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                            <Button size="sm" variant="primary" isLoading={editBusy} onClick={() => saveTruckNo(disp.id)}>
+                              Save
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingDispatchId(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingDispatchId(disp.id);
+                              setEditTruckNo(disp.truckNo);
+                              setEditError(null);
+                            }}
+                          >
+                            Edit truck no.
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

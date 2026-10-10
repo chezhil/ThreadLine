@@ -1,7 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Button, Drawer, EmptyState, Input, Select, Table } from "@/components/ui";
-import { postJson, useApi } from "@/lib/useApi";
+import { Badge, Button, Drawer, EmptyState, Input, Select, Table } from "@/components/ui";
+import { firstError, postJson, useApi } from "@/lib/useApi";
+import { useRealtimeEvent } from "@/lib/useRealtime";
+import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import { inr } from "@/lib/accounts/format";
 import { WORKER_ROLES, workerSchema } from "@/lib/validation/accounts";
 import { ErrorNote, Loading, PageTitle } from "./Stat";
@@ -12,6 +14,7 @@ interface WorkerRow {
   name: string;
   role: string;
   dailyWage: number;
+  archivedAt: string | null;
   _count: { attendance: number };
 }
 
@@ -21,14 +24,28 @@ export function WorkersClient() {
   const { data, loading, error, refetch } = useApi<{ workers: WorkerRow[] }>("/api/workers");
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<WorkerRow | "new" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
+  useRealtimeEvent<DataChange>(RealtimeEvents.DataChanged, (change) => {
+    if (change.entity === "Worker") refetch();
+  });
+
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return (data?.workers ?? []).filter((w) => (!role || w.role === role) && (!needle || w.name.toLowerCase().includes(needle)));
-  }, [data, q, role]);
+    return (data?.workers ?? []).filter(
+      (w) => (showArchived || !w.archivedAt) && (!role || w.role === role) && (!needle || w.name.toLowerCase().includes(needle)),
+    );
+  }, [data, q, role, showArchived]);
+
+  async function setArchived(w: WorkerRow, archived: boolean) {
+    setRowError(null);
+    const res = await postJson(`/api/workers/${w.id}`, { archived }, "PATCH");
+    if (!res.ok) setRowError(firstError(res, `Couldn't ${archived ? "archive" : "restore"} ${w.name}`));
+    refetch();
+  }
 
   async function remove(w: WorkerRow) {
     setRowError(null);
@@ -46,7 +63,7 @@ export function WorkersClient() {
     <div className="flex flex-col gap-4">
       <PageTitle title="Workers" subtitle="Daily wage per worker. Wages are earned from attendance: full day, half day or absent." action={<Button onClick={() => setEditing("new")}>Add worker</Button>} />
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-center">
         <Input aria-label="Search workers" placeholder="Search by name" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
           aria-label="Role"
@@ -54,6 +71,10 @@ export function WorkersClient() {
           onChange={(e) => setRole(e.target.value)}
           options={[{ value: "", label: "All roles" }, ...WORKER_ROLES.map((r) => ({ value: r, label: roleLabel(r) }))]}
         />
+        <label className="flex items-center gap-2 text-sm text-gray-600">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived
+        </label>
       </div>
 
       {rowError && <ErrorNote message={rowError} />}
@@ -62,7 +83,15 @@ export function WorkersClient() {
       {data && (
         <Table
           columns={[
-            { header: "Name", render: (w: WorkerRow) => <span className="font-medium">{w.name}</span> },
+            {
+              header: "Name",
+              render: (w: WorkerRow) => (
+                <span className="flex items-center gap-2 font-medium">
+                  {w.name}
+                  {w.archivedAt && <Badge status="pending">archived</Badge>}
+                </span>
+              ),
+            },
             { header: "Role", render: (w) => roleLabel(w.role) },
             { header: "Daily wage", className: "text-right tabular-nums", render: (w) => inr(w.dailyWage) },
             { header: "Attendance marks", className: "text-right tabular-nums", render: (w) => w._count.attendance },
@@ -72,6 +101,9 @@ export function WorkersClient() {
                 <div className="flex justify-end gap-2">
                   <Button size="sm" variant="secondary" onClick={() => setEditing(w)}>
                     Edit
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setArchived(w, !w.archivedAt)}>
+                    {w.archivedAt ? "Restore" : "Archive"}
                   </Button>
                   {confirmDelete === w.id ? (
                     <>

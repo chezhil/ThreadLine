@@ -1,7 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Button, Drawer, EmptyState, Input, Select, Table } from "@/components/ui";
-import { postJson, useApi } from "@/lib/useApi";
+import { Button, Drawer, EmptyState, Input, Select, Table, Textarea } from "@/components/ui";
+import { firstError, postJson, useApi } from "@/lib/useApi";
+import { useRealtimeEvent } from "@/lib/useRealtime";
+import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import { currentMonthKey } from "@/lib/accounts/period";
 import { EXPENSE_CATEGORY_LABEL, dateIN, inr, todayIST } from "@/lib/accounts/format";
 import { EXPENSE_CATEGORIES, expenseSchema } from "@/lib/validation/accounts";
@@ -17,6 +19,8 @@ interface ExpenseRow {
   orderId: string | null;
   orderNo: string | null;
   note: string | null;
+  isPayout: boolean;
+  reversal: { reason: string; createdAt: string; replacementId: string | null } | null;
 }
 
 export function ExpensesClient() {
@@ -25,10 +29,16 @@ export function ExpensesClient() {
   const [category, setCategory] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [reverseFor, setReverseFor] = useState<ExpenseRow | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const { data, loading, error, refetch } = useApi<{
     expenses: ExpenseRow[];
     totals: { total: number; byCategory: Record<string, number> };
   }>(`/api/expenses?month=${month}${category ? `&category=${category}` : ""}`);
+
+  useRealtimeEvent<DataChange>(RealtimeEvents.DataChanged, (change) => {
+    if (change.entity === "Expense") refetch();
+  });
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -50,6 +60,11 @@ export function ExpensesClient() {
         }
       />
 
+      {flash && (
+        <div role="status" className="rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800">
+          {flash}
+        </div>
+      )}
       {error && <ErrorNote message={`Couldn't load expenses: ${error}`} onRetry={refetch} />}
       {loading && !data && <Loading />}
 
@@ -74,11 +89,47 @@ export function ExpensesClient() {
 
           <Table
             columns={[
-              { header: "Date", render: (e: ExpenseRow) => dateIN(e.date) },
-              { header: "Category", render: (e) => EXPENSE_CATEGORY_LABEL[e.category] ?? e.category },
-              { header: "Note", className: "max-w-xs truncate", render: (e) => <span title={e.note ?? ""}>{e.note ?? "—"}</span> },
+              {
+                header: "Date",
+                render: (e: ExpenseRow) => (
+                  <>
+                    <span className={e.reversal ? "text-gray-500" : ""}>{dateIN(e.date)}</span>
+                    {e.reversal && (
+                      <span className="block text-xs text-gray-500">
+                        Reversed {dateIN(e.reversal.createdAt)}: {e.reversal.reason}
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              { header: "Category", render: (e) => <span className={e.reversal ? "text-gray-500" : ""}>{EXPENSE_CATEGORY_LABEL[e.category] ?? e.category}</span> },
+              {
+                header: "Note",
+                className: "max-w-xs truncate",
+                render: (e) => (
+                  <span className={e.reversal ? "text-gray-500" : ""} title={e.note ?? ""}>
+                    {e.note ?? "—"}
+                    {e.isPayout && <span className="ml-1 text-xs text-gray-400">(payout)</span>}
+                  </span>
+                ),
+              },
               { header: "Order", render: (e) => e.orderNo ?? <span className="text-gray-400">Shared</span> },
-              { header: "Amount", className: "text-right tabular-nums", render: (e) => inr(e.amount, { decimals: true }) },
+              {
+                header: "Amount",
+                className: "text-right tabular-nums",
+                render: (e) => <span className={e.reversal ? "text-gray-500 line-through" : ""}>{inr(e.amount, { decimals: true })}</span>,
+              },
+              {
+                header: "",
+                render: (e) =>
+                  !e.reversal && !e.isPayout ? (
+                    <div className="flex justify-end">
+                      <Button size="sm" variant="ghost" onClick={() => setReverseFor(e)}>
+                        Reverse
+                      </Button>
+                    </div>
+                  ) : null,
+              },
             ]}
             rows={rows}
             keyFor={(e) => e.id}
@@ -92,6 +143,20 @@ export function ExpensesClient() {
           <ExpenseForm
             onSaved={() => {
               setOpen(false);
+              refetch();
+            }}
+          />
+        )}
+      </Drawer>
+
+      <Drawer open={!!reverseFor} onClose={() => setReverseFor(null)} title="Reverse / correct expense">
+        {reverseFor && (
+          <ReverseExpenseForm
+            key={reverseFor.id}
+            expense={reverseFor}
+            onSaved={(msg) => {
+              setReverseFor(null);
+              setFlash(msg);
               refetch();
             }}
           />
@@ -147,6 +212,82 @@ function ExpenseForm({ onSaved }: { onSaved: () => void }) {
       {form.errors._form && <p className="text-sm text-red-600">{form.errors._form[0]}</p>}
       <Button type="submit" disabled={form.submitting}>
         {form.submitting ? "Saving…" : "Save expense"}
+      </Button>
+    </form>
+  );
+}
+
+function ReverseExpenseForm({ expense, onSaved }: { expense: ExpenseRow; onSaved: (message: string) => void }) {
+  const orders = useApi<{ orders: { id: string; orderNo: string; buyer: { name: string } }[] }>("/api/orders");
+  const [reason, setReason] = useState("");
+  const [correct, setCorrect] = useState(false);
+  const [category, setCategory] = useState(expense.category);
+  const [amount, setAmount] = useState(String(expense.amount));
+  const [date, setDate] = useState(expense.date.slice(0, 10));
+  const [orderId, setOrderId] = useState(expense.orderId ?? "");
+  const [note, setNote] = useState(expense.note ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (reason.trim().length < 3) {
+      setError("Say why this is being reversed");
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    const body: { reason: string; correction?: Record<string, unknown> } = { reason };
+    if (correct) body.correction = { category, amount: Number(amount), date, orderId: orderId || null, note: note || null };
+    const res = await postJson(`/api/expenses/${expense.id}/reversal`, body);
+    setSubmitting(false);
+    if (!res.ok) {
+      setError(firstError(res, "Couldn't reverse the expense"));
+      return;
+    }
+    onSaved(correct ? "Expense reversed and the correction recorded." : "Expense reversed.");
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3" noValidate>
+      <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600">
+        {EXPENSE_CATEGORY_LABEL[expense.category] ?? expense.category} · {inr(expense.amount, { decimals: true })} · {dateIN(expense.date)}
+        {expense.note && <span> · {expense.note}</span>}
+      </div>
+      <Textarea label="Reason" name="reason" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
+      <label className="flex items-center gap-2 text-sm text-gray-600">
+        <input type="checkbox" checked={correct} onChange={(e) => setCorrect(e.target.checked)} />
+        Record the corrected bill in the same step
+      </label>
+      {correct && (
+        <>
+          <Select
+            label="Category"
+            options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: EXPENSE_CATEGORY_LABEL[c] }))}
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          />
+          <Input label="Amount (₹)" type="number" step="0.01" min="0" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input label="Bill date" type="date" max={todayIST()} value={date} onChange={(e) => setDate(e.target.value)} />
+          <Select
+            label="Charge to order (optional)"
+            options={[
+              { value: "", label: "Shared — spread across the month's production" },
+              ...(orders.data?.orders ?? []).map((o) => ({ value: o.id, label: `${o.orderNo} — ${o.buyer.name}` })),
+            ]}
+            value={orderId}
+            onChange={(e) => setOrderId(e.target.value)}
+          />
+          <Input label="Note" maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} />
+        </>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
+        </p>
+      )}
+      <Button type="submit" variant="danger" disabled={submitting}>
+        {submitting ? "Reversing…" : "Reverse expense"}
       </Button>
     </form>
   );
