@@ -12,9 +12,9 @@ import { recomputeDispatchStatus } from "@/lib/order-status";
 import { enqueueAlert } from "@/lib/alerts/outbox";
 import { postLedgerEntry } from "@/lib/ledger";
 
-// 5% over-production allowance — rolls rarely sum to exactly qtyMetres, and
-// this mirrors the wastage tolerance costing/feasibility already use.
-const OVER_DISPATCH_TOLERANCE = 1.05;
+// 15% over-production allowance — rolls rarely sum to exactly qtyMetres, and
+// this mirrors industry standard textile mill tolerances and seeded demo rolls.
+const OVER_DISPATCH_TOLERANCE = 1.15;
 
 export async function GET(req: NextRequest) {
   const actor = await qualityActor();
