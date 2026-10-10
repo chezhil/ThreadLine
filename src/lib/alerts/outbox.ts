@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { Prisma } from "@prisma/client";
 
+const SEND_LEASE_MS = 5 * 60 * 1000;
+
 export type AlertChannel = "WHATSAPP" | "EMAIL" | "SMS" | "IN_APP";
 
 export interface EnqueueAlertOptions {
@@ -39,10 +41,9 @@ export async function enqueueAlert(
     }
   }
 
-  const payloadStr =
-    typeof opts.payload === "string"
-      ? opts.payload
-      : JSON.stringify(opts.payload);
+  // Always store JSON: a plain-text payload becomes { message }, so the
+  // delivery step (which parses it) doesn't fail every string payload.
+  const payloadStr = JSON.stringify(typeof opts.payload === "string" ? { message: opts.payload } : opts.payload);
 
   return client.alertDelivery.create({
     data: {
@@ -95,10 +96,11 @@ export async function processAlertOutbox(batchSize = 25): Promise<{
 }> {
   const now = new Date();
 
-  // Find alerts due for delivery
+  // Find alerts due for delivery. SENDING rows whose lease ran out belong to
+  // a worker that died mid-send and are picked up again.
   const pendingAlerts = await db.alertDelivery.findMany({
     where: {
-      status: { in: ["PENDING", "RETRYING"] },
+      status: { in: ["PENDING", "RETRYING", "SENDING"] },
       scheduledFor: { lte: now },
     },
     take: batchSize,
@@ -108,8 +110,17 @@ export async function processAlertOutbox(batchSize = 25): Promise<{
   let sent = 0;
   let failed = 0;
   let retried = 0;
+  let processed = 0;
 
   for (const alert of pendingAlerts) {
+    // Claim the row first (conditional on the state we read), so two
+    // workers draining the outbox at once never send the same alert twice.
+    const claimed = await db.alertDelivery.updateMany({
+      where: { id: alert.id, status: alert.status, scheduledFor: alert.scheduledFor },
+      data: { status: "SENDING", scheduledFor: new Date(Date.now() + SEND_LEASE_MS) },
+    });
+    if (claimed.count !== 1) continue;
+    processed++;
     const attempts = alert.attempts + 1;
     const result = await deliverAlert(alert);
 
@@ -149,7 +160,7 @@ export async function processAlertOutbox(batchSize = 25): Promise<{
   }
 
   return {
-    processed: pendingAlerts.length,
+    processed,
     sent,
     failed,
     retried,

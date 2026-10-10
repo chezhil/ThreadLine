@@ -5,11 +5,12 @@ export const instant = false;
 
 const STAGES = [
   { key: "NEW", label: "Order placed" },
-  { key: "CONFIRMED", label: "Yarn reserved" },
+  { key: "CONFIRMED", label: "Confirmed" },
   { key: "IN_PRODUCTION", label: "Weaving / dyeing" },
   { key: "QC", label: "Quality check" },
   { key: "READY", label: "Ready" },
   { key: "DISPATCHED", label: "Dispatched" },
+  { key: "CLOSED", label: "Delivered" },
 ];
 
 export default async function TrackPage({ params }: { params: Promise<{ token: string }> }) {
@@ -17,7 +18,7 @@ export default async function TrackPage({ params }: { params: Promise<{ token: s
 
   const order = await db.order.findUnique({
     where: { trackingToken: token },
-    include: { buyer: true, rolls: { select: { qcStatus: true, dispatchId: true } } },
+    include: { buyer: { select: { name: true } }, rolls: { select: { qcStatus: true, dispatchId: true } } },
   });
 
   if (!order) notFound();
@@ -25,6 +26,7 @@ export default async function TrackPage({ params }: { params: Promise<{ token: s
   const stageIdx = STAGES.findIndex((s) => s.key === order.status);
   const rollsTotal = order.rolls.length;
   const rollsReady = order.rolls.filter((r) => r.qcStatus === "PASS").length;
+  const rollsShipped = order.rolls.filter((r) => r.dispatchId).length;
 
   return (
     <div className="flex min-h-screen flex-col items-center bg-background px-4 py-10">
@@ -57,13 +59,25 @@ export default async function TrackPage({ params }: { params: Promise<{ token: s
             ))}
           </ol>
 
-          <p className="mb-1 text-sm text-gray-500">Rolls ready</p>
+          <p className="mb-1 text-sm text-gray-500">Rolls passed quality check</p>
           <p className="mb-4 font-medium">
             {rollsReady} / {rollsTotal}
           </p>
 
+          {rollsShipped > 0 && (
+            <>
+              <p className="mb-1 text-sm text-gray-500">Rolls shipped</p>
+              <p className="mb-4 font-medium">
+                {rollsShipped} / {rollsTotal}
+                {order.dispatchStatus === "PARTIALLY_DISPATCHED" ? " (part shipment, more to follow)" : ""}
+              </p>
+            </>
+          )}
+
           <p className="mb-1 text-sm text-gray-500">Estimated delivery</p>
-          <p className="font-medium">{order.deadline.toLocaleDateString()}</p>
+          <p className="font-medium">
+            {order.deadline.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}
+          </p>
         </div>
       </div>
     </div>

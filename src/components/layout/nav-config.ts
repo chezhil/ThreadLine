@@ -27,10 +27,30 @@ export function navForRole(role: Role): NavItem[] {
   return NAV_ITEMS.filter((item) => item.roles.includes(role));
 }
 
-// Mobile bottom tab bar shows only the role's top 4 actions.
-export const MOBILE_TOP_ACTIONS: Record<Role, string[]> = {
-  owner: ["/dashboard", "/orders", "/production/floor-board", "/accounts"],
-  storekeeper: ["/inventory", "/dispatch", "/alerts", "/orders"],
-  floor_supervisor: ["/production/floor-board", "/production/work-orders", "/alerts", "/orders"],
-  qc_inspector: ["/quality/qc", "/quality/rolls", "/alerts", "/orders"],
+// Mobile bottom tab bar shows only the role's top actions — every one a page
+// that role can actually open (sub-pages carry their own labels).
+export const MOBILE_TOP_ACTIONS: Record<Role, { label: string; href: string }[]> = {
+  owner: [
+    { label: "Dashboard", href: "/dashboard" },
+    { label: "Orders", href: "/orders" },
+    { label: "Production", href: "/production/floor-board" },
+    { label: "Accounts", href: "/accounts" },
+  ],
+  storekeeper: [
+    { label: "Inventory", href: "/inventory" },
+    { label: "Dispatch", href: "/dispatch" },
+    { label: "Alerts", href: "/alerts" },
+  ],
+  floor_supervisor: [
+    { label: "Floor board", href: "/production/floor-board" },
+    { label: "Work orders", href: "/production/work-orders" },
+    { label: "Machines", href: "/production/machines" },
+    { label: "Alerts", href: "/alerts" },
+  ],
+  qc_inspector: [
+    { label: "QC queue", href: "/quality/qc" },
+    { label: "Rolls", href: "/quality/rolls" },
+    { label: "Defects", href: "/quality/defects" },
+    { label: "Alerts", href: "/alerts" },
+  ],
 };

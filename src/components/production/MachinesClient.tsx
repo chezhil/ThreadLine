@@ -40,7 +40,7 @@ export function MachinesClient() {
     const parsed = machineStatusChangeSchema.safeParse({ status });
     if (!parsed.success) return;
     const result = await writeApi(`/api/machines/${id}/status`, "PATCH", parsed.data);
-    if (!result.ok) setLoadError(result.error ?? Object.values(result.fieldErrors).flat().join(" "));
+    if (!result.ok) setLoadError(Object.values(result.fieldErrors).flat().join(" ") || result.error);
     refresh();
   }
 
@@ -96,7 +96,7 @@ function MachineCard({ machine, onStatus, onChanged }: { machine: FloorMachine; 
   async function remove() {
     if (!window.confirm(`Remove ${machine.name}? This is only possible when it has no production history.`)) return;
     const result = await writeApi(`/api/machines/${machine.id}`, "DELETE");
-    if (!result.ok) { setError(result.error ?? Object.values(result.fieldErrors).flat().join(" ")); return; }
+    if (!result.ok) { setError(Object.values(result.fieldErrors).flat().join(" ") || result.error); return; }
     onChanged();
   }
 

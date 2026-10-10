@@ -2,14 +2,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Role } from "@/lib/auth";
-import { NAV_ITEMS, MOBILE_TOP_ACTIONS } from "./nav-config";
+import { MOBILE_TOP_ACTIONS } from "./nav-config";
 
 export function BottomTabs({ role }: { role: Role }) {
   const pathname = usePathname();
-  const hrefs = MOBILE_TOP_ACTIONS[role] ?? [];
-  const items = hrefs
-    .map((href) => NAV_ITEMS.find((item) => item.href === href))
-    .filter((item): item is NonNullable<typeof item> => !!item);
+  const items = MOBILE_TOP_ACTIONS[role] ?? [];
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-white md:hidden">
