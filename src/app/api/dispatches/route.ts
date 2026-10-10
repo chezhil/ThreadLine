@@ -55,7 +55,25 @@ export async function POST(req: NextRequest) {
       return handleZodError(parsed.error);
     }
 
-    const { buyerId, truckNo, rollIds } = parsed.data;
+    const { buyerId, truckNo, rollIds, clientMutationId } = parsed.data;
+
+    // Idempotency check for offline replay
+    if (clientMutationId) {
+      const existing = await db.dispatch.findUnique({
+        where: { id: clientMutationId },
+        include: {
+          rolls: {
+            include: {
+              order: true,
+              machine: true,
+            },
+          },
+        },
+      });
+      if (existing) {
+        return NextResponse.json(existing, { status: 200 });
+      }
+    }
 
     // Verify buyer exists
     const buyer = await db.buyer.findUnique({
@@ -162,7 +180,12 @@ export async function POST(req: NextRequest) {
         const invoiceId = invoice.id;
 
         const newDispatch = await tx.dispatch.create({
-          data: { buyerId, truckNo, invoiceId },
+          data: {
+            id: clientMutationId || undefined,
+            buyerId,
+            truckNo,
+            invoiceId,
+          },
         });
 
         // Update all rolls (re-checking inside the transaction so two

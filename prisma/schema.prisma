@@ -249,3 +249,21 @@ model AuditLog {
   userId   String
   at       DateTime @default(now())
 }
+
+model AlertDelivery {
+  id             String    @id @default(uuid())
+  notificationId String?
+  channel        String    // WHATSAPP | EMAIL | SMS | IN_APP
+  recipient      String    // phone number or email
+  templateName   String?
+  payload        String    // JSON stringified payload
+  status         String    @default("PENDING") // PENDING | SENT | FAILED | RETRYING
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3)
+  lastError      String?
+  scheduledFor   DateTime  @default(now())
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([status, scheduledFor])
+}

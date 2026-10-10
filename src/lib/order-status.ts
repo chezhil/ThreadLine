@@ -49,7 +49,7 @@ export interface GranularStatus {
 export function deriveStatus(current: string, g: GranularStatus): OrderStatus {
   if (current === "CLOSED") return "CLOSED"; // terminal, only applyClose leaves it
   if (g.dispatchStatus === "FULLY_DISPATCHED") return "DISPATCHED";
-  if (g.productionStatus === "DONE" && g.qcStatus === "PASS") return "READY";
+  if (g.productionStatus === "DONE" && (g.qcStatus === "PASS" || g.qcStatus === "NEEDS_REWORK")) return "READY";
   if (g.productionStatus === "DONE") return "QC";
   if (g.productionStatus === "IN_PRODUCTION") return "IN_PRODUCTION";
   return current === "CONFIRMED" ? "CONFIRMED" : "NEW";

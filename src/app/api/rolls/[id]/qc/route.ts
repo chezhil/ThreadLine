@@ -24,6 +24,21 @@ export async function POST(
 
     const data = parsed.data;
 
+    // Idempotency check for offline replay
+    if (data.clientMutationId) {
+      const existing = await db.qCRecord.findUnique({
+        where: { id: data.clientMutationId },
+        include: { roll: true },
+      });
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          qcRecord: existing,
+          roll: existing.roll,
+        });
+      }
+    }
+
     // Check if roll exists
     const roll = await db.roll.findUnique({
       where: { id },
@@ -54,6 +69,7 @@ export async function POST(
     const { qcRecord, updatedRoll } = await db.$transaction(async (tx) => {
       const qcRecord = await tx.qCRecord.create({
         data: {
+          id: data.clientMutationId || undefined,
           rollId: roll.id,
           // The signed-in inspector, never a client-supplied id.
           inspectorId: actor.user.id,
