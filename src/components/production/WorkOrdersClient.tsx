@@ -5,6 +5,7 @@ import { productionLogSchema, workOrderSchema } from "@/lib/validation/productio
 import { readApi, writeApi, type FieldErrors } from "./api";
 import type { WorkOrderResponse } from "./types";
 import { useProductionRealtime } from "./useProductionRealtime";
+import { WorkOrderCard } from "./WorkOrderCard";
 
 const machineTypeForStage: Record<string, string> = { spinning: "spinning", weaving: "loom", dyeing: "dyeing" };
 
@@ -57,7 +58,7 @@ export function WorkOrdersClient() {
   ) ?? [];
   return <div className="production-page">
     <h1>Work orders & production</h1>
-    <p className="production-muted">Assign each stage to a machine, then record shift output in metres.</p>
+    <p className="production-muted">Assign each stage to a machine, then record shift output in metres. A mistyped entry can be corrected under each work order.</p>
     {error && <p role="alert" className="production-error">{error}</p>}
     <div className="production-grid">
       <section className="production-panel">
@@ -96,12 +97,7 @@ export function WorkOrdersClient() {
       {!data && !error && <p>Loading work orders…</p>}
       {data?.workOrders.length === 0 && <p>No work orders yet.</p>}
       {data && data.workOrders.length > 0 && visibleWorkOrders.length === 0 && <p>No work orders match these filters.</p>}
-      <div className="production-grid">{visibleWorkOrders.map((workOrder) => <article key={workOrder.id} className="production-panel">
-        <strong>{workOrder.order.orderNo}</strong> · {workOrder.stage}
-        <p>{workOrder.machine.name} · {workOrder.status}</p>
-        <progress className="production-progress" value={workOrder.producedQty} max={workOrder.plannedQty} aria-label={`${workOrder.order.orderNo} ${workOrder.stage} progress`} />
-        <p>{workOrder.producedQty} / {workOrder.plannedQty} m</p>
-      </article>)}</div>
+      <div className="production-grid">{visibleWorkOrders.map((workOrder) => <WorkOrderCard key={workOrder.id} workOrder={workOrder} machines={data?.machines ?? []} onChanged={refresh} />)}</div>
     </section>
   </div>;
 }

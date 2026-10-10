@@ -1,8 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Button, Card, CardHeader, EmptyState, Input, Select, Table } from "@/components/ui";
-import { postJson, useApi } from "@/lib/useApi";
-import { currentMonthKey } from "@/lib/accounts/period";
+import { Button, Card, CardHeader, ConfirmButton, EmptyState, Input, Select, Table } from "@/components/ui";
+import { firstError, postJson, useApi } from "@/lib/useApi";
+import { currentMonthKey, monthLabel } from "@/lib/accounts/period";
 import { inr, todayIST } from "@/lib/accounts/format";
 import { ATTENDANCE_STATUSES, SHIFTS, attendanceBatchSchema, type AttendanceStatus } from "@/lib/validation/accounts";
 import { MonthPicker } from "./MonthPicker";
@@ -13,6 +13,7 @@ interface Worker {
   id: string;
   name: string;
   role: string;
+  archivedAt: string | null;
 }
 interface Machine {
   id: string;
@@ -48,7 +49,7 @@ function MusterSheet() {
   const [date, setDate] = useState(todayIST());
   const [shift, setShift] = useState<string>(SHIFTS[0]);
   const workers = useApi<{ workers: Worker[] }>("/api/workers");
-  const sheet = useApi<{ marks: (Mark & { id: string })[]; machines: Machine[] }>(
+  const sheet = useApi<{ marks: (Mark & { id: string })[]; machines: Machine[]; locked: boolean }>(
     `/api/attendance?date=${date}&shift=${encodeURIComponent(shift)}`,
   );
   // Local edits on top of what's saved, keyed by sheet so switching date/shift starts clean.
@@ -60,8 +61,8 @@ function MusterSheet() {
   const localEdits = edits.key === sheetKey ? edits.marks : {};
 
   const saved = useMemo(() => {
-    const m: Record<string, Mark> = {};
-    for (const a of sheet.data?.marks ?? []) m[a.workerId] = { workerId: a.workerId, status: a.status, machineId: a.machineId };
+    const m: Record<string, Mark & { id: string }> = {};
+    for (const a of sheet.data?.marks ?? []) m[a.workerId] = { id: a.id, workerId: a.workerId, status: a.status, machineId: a.machineId };
     return m;
   }, [sheet.data]);
 
@@ -71,8 +72,25 @@ function MusterSheet() {
     setEdits((e) => ({ key: sheetKey, marks: { ...(e.key === sheetKey ? e.marks : {}), [id]: mark } }));
   };
   const machines = sheet.data?.machines ?? [];
-  const list = workers.data?.workers ?? [];
+  // Archived workers are off the muster, except where this sheet already
+  // marked them (that mark can still be corrected or removed).
+  const list = (workers.data?.workers ?? []).filter((w) => !w.archivedAt || saved[w.id]);
+  const locked = sheet.data?.locked ?? false;
   const dirty = Object.keys(localEdits).length > 0;
+
+  async function removeMark(workerId: string) {
+    const mark = saved[workerId];
+    if (!mark) return null;
+    const res = await postJson(`/api/attendance/${mark.id}`, undefined, "DELETE");
+    if (!res.ok) return firstError(res, "Couldn't remove the mark");
+    setEdits((e) => {
+      const marks = { ...(e.key === sheetKey ? e.marks : {}) };
+      delete marks[workerId];
+      return { key: sheetKey, marks };
+    });
+    sheet.refetch();
+    return null;
+  }
 
   function markAllPresent() {
     const next: Record<string, Mark | null> = { ...localEdits };
@@ -125,15 +143,20 @@ function MusterSheet() {
         <Input label="Date" type="date" max={todayIST()} value={date} onChange={(e) => setDate(e.target.value)} error={errors.date?.[0]} />
         <Select label="Shift" value={shift} onChange={(e) => setShift(e.target.value)} options={SHIFTS.map((s) => ({ value: s, label: s }))} error={errors.shift?.[0]} />
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={markAllPresent} disabled={!list.length}>
+          <Button type="button" variant="secondary" onClick={markAllPresent} disabled={!list.length || locked}>
             Mark unmarked present
           </Button>
-          <Button type="button" onClick={save} disabled={saving || !dirty}>
+          <Button type="button" onClick={save} disabled={saving || !dirty || locked}>
             {saving ? "Saving…" : "Save sheet"}
           </Button>
         </div>
       </div>
       {flash && <p role="status" className="mb-2 text-sm text-green-700">{flash}</p>}
+      {locked && (
+        <p role="status" className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Wages for {monthLabel(date.slice(0, 7))} have been paid out, so this month&apos;s attendance is locked.
+        </p>
+      )}
       {(errors._form || errors.entries) && <p className="mb-2 text-sm text-red-600">{(errors._form ?? errors.entries)[0]}</p>}
       {(workers.error || sheet.error) && <ErrorNote message={`Couldn't load the sheet: ${workers.error ?? sheet.error}`} onRetry={() => { workers.refetch(); sheet.refetch(); }} />}
       {(workers.loading || sheet.loading) && !(workers.data && sheet.data) && <Loading />}
@@ -150,7 +173,7 @@ function MusterSheet() {
               return (
                 <div key={w.id} className="flex flex-col gap-2 p-3 md:flex-row md:items-center">
                   <div className="md:w-48">
-                    <p className="text-sm font-medium text-foreground">{w.name}</p>
+                    <p className="text-sm font-medium text-foreground">{w.name}{w.archivedAt ? " (archived)" : ""}</p>
                     <p className="text-xs text-gray-500">{roleLabel(w.role)}{w.id in localEdits ? " · edited" : saved[w.id] ? " · saved" : ""}</p>
                   </div>
                   <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={`${w.name} attendance`}>
@@ -160,6 +183,7 @@ function MusterSheet() {
                         type="button"
                         role="radio"
                         aria-checked={mark?.status === s}
+                        disabled={locked}
                         onClick={() => setMark(w.id, { workerId: w.id, status: s, machineId: s === "absent" ? null : mark?.machineId ?? null })}
                         className={`rounded-full border px-3 py-1 text-xs font-medium ${
                           mark?.status === s ? STATUS_TONE[s] : "border-border bg-white text-gray-600 hover:bg-gray-50"
@@ -173,12 +197,13 @@ function MusterSheet() {
                         clear
                       </button>
                     )}
+                    {saved[w.id] && !locked && <ConfirmButton label="Remove mark" confirmLabel="Remove" onConfirm={() => removeMark(w.id)} />}
                   </div>
                   <div className="md:ml-auto md:w-64">
                     <select
                       aria-label={`${w.name} machine`}
                       className={`w-full rounded-md border bg-white px-3 py-1.5 text-sm ${err ? "border-red-400" : "border-border"}`}
-                      disabled={!mark || mark.status === "absent"}
+                      disabled={!mark || mark.status === "absent" || locked}
                       value={mark?.machineId ?? ""}
                       onChange={(e) => mark && setMark(w.id, { ...mark, machineId: e.target.value || null })}
                     >

@@ -37,16 +37,29 @@ export type MachineResponse = {
   }[];
 };
 
+export type WorkOrderRow = {
+  id: string;
+  stage: string;
+  status: string;
+  plannedQty: number;
+  producedQty: number;
+  order: { orderNo: string; status: string };
+  machine: { id: string; name: string; status: string };
+  _count: { productionLogs: number; rolls: number };
+};
+
+export type ProductionMachine = { id: string; name: string; type: string; status: string };
+
 export type WorkOrderResponse = {
-  workOrders: {
-    id: string;
-    stage: string;
-    status: string;
-    plannedQty: number;
-    producedQty: number;
-    order: { orderNo: string };
-    machine: { name: string; status: string };
-  }[];
+  workOrders: WorkOrderRow[];
   orders: { id: string; orderNo: string; status: string }[];
-  machines: { id: string; name: string; type: string; status: string }[];
+  machines: ProductionMachine[];
+};
+
+export type ProductionLogRow = {
+  id: string;
+  shift: string;
+  qtyProduced: number;
+  loggedAt: string;
+  loggedByName: string;
 };

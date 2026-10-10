@@ -10,6 +10,7 @@ import { attendanceLocked } from "@/lib/accounts/summary";
 
 // GET ?date=YYYY-MM-DD&shift=…  → the muster sheet for that date/shift
 // GET ?month=YYYY-MM            → per-worker attendance and wages for the month
+// Both say whether the month is locked (its wage payout was approved).
 export async function GET(req: NextRequest) {
   const user = await requireRole("owner");
   if (!user) return forbidden();
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     const shift = sp.get("shift");
     if (shift && !(SHIFTS as readonly string[]).includes(shift)) return fieldErrorResponse({ shift: ["Unknown shift"] });
     const { start, end } = dayRange(date);
-    const [marks, machines] = await Promise.all([
+    const [marks, machines, locked] = await Promise.all([
       db.attendance.findMany({
         where: { date: { gte: start, lt: end }, ...(shift ? { shift } : {}) },
         include: { worker: { select: { name: true, role: true } } },
@@ -29,8 +30,9 @@ export async function GET(req: NextRequest) {
       }),
       // Machines to assign operators to (read-only; Module 2 owns the table).
       db.machine.findMany({ select: { id: true, name: true, type: true, status: true }, orderBy: { name: "asc" } }),
+      attendanceLocked(date.slice(0, 7)),
     ]);
-    return NextResponse.json({ date, shift, marks, machines });
+    return NextResponse.json({ date, shift, marks, machines, locked });
   }
 
   const monthParsed = monthQuerySchema.safeParse(sp.get("month") ?? undefined);
@@ -38,9 +40,10 @@ export async function GET(req: NextRequest) {
   const month = monthParsed.data ?? currentMonthKey();
   const { start, end } = monthRange(month);
 
-  const [workers, marks] = await Promise.all([
+  const [workers, marks, locked] = await Promise.all([
     db.worker.findMany({ orderBy: { name: "asc" } }),
     db.attendance.findMany({ where: { date: { gte: start, lt: end } }, select: { workerId: true, status: true, date: true, dailyWage: true } }),
+    attendanceLocked(month),
   ]);
   const rows = workers.map((w) => {
     const mine = marks.filter((m) => m.workerId === w.id);
@@ -61,6 +64,7 @@ export async function GET(req: NextRequest) {
   });
   return NextResponse.json({
     month,
+    locked,
     rows,
     totals: {
       wages: round2(rows.reduce((s, r) => s + r.wages, 0)),

@@ -6,3 +6,5 @@ export * from "./Badge";
 export * from "./Card";
 export * from "./Drawer";
 export * from "./EmptyState";
+export * from "./ConfirmButton";
+export * from "./Textarea";

@@ -4,6 +4,8 @@ export interface Column<T> {
   header: string;
   render: (row: T) => ReactNode;
   className?: string;
+  /** Needed when two columns share a header (e.g. two blank action columns). */
+  key?: string;
 }
 
 export interface TableProps<T> {
@@ -25,7 +27,7 @@ export function Table<T>({ columns, rows, keyFor, emptyState }: TableProps<T>) {
           <tr>
             {columns.map((col) => (
               <th
-                key={col.header}
+                key={col.key ?? col.header}
                 className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap"
               >
                 {col.header}
@@ -37,7 +39,7 @@ export function Table<T>({ columns, rows, keyFor, emptyState }: TableProps<T>) {
           {rows.map((row) => (
             <tr key={keyFor(row)} className="hover:bg-gray-50">
               {columns.map((col) => (
-                <td key={col.header} className={`px-3 py-2 whitespace-nowrap ${col.className ?? ""}`}>
+                <td key={col.key ?? col.header} className={`px-3 py-2 whitespace-nowrap ${col.className ?? ""}`}>
                   {col.render(row)}
                 </td>
               ))}

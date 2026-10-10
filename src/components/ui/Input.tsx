@@ -22,9 +22,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             error ? "border-red-400" : "border-border"
           } ${className}`}
           aria-invalid={!!error}
+          aria-describedby={error && inputId ? `${inputId}-error` : undefined}
           {...props}
         />
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && (
+          <span id={inputId ? `${inputId}-error` : undefined} className="text-xs text-red-600">
+            {error}
+          </span>
+        )}
       </div>
     );
   },

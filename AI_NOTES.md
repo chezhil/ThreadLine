@@ -736,3 +736,118 @@ the end-to-end flows, offline replay, and the approvals/ledger/conflict UI.
 reads Payment/Expense rows rather than the ledger (they agree, the invariant
 check proves it); purchase approval doesn't create a yarn lot (by design —
 stock is added when the yarn arrives).
+
+---
+
+## CRUD, reverse-and-correct and archiving (Devacharan, Claude) — branch `feature/crud-and-final-verification` (IN PROGRESS, not merged)
+
+Goal: every mistyped record can be corrected from the app. Backend is complete
+and tested; UI is about two-thirds done. **Not merged to `main`** — the live
+Ollama checks and the Playwright pass were not run yet (see "Handoff").
+
+### Decisions (and why)
+- **Append-only money and QC via a `Reversal` table** (migration
+  `20261010123916_reversals_and_archiving`). Payments, expenses, invoices and QC
+  inspections are never edited or deleted. Reversing inserts one `Reversal`
+  row (unique FK per record, `ON DELETE RESTRICT`) and, for money, a reversing
+  `LedgerEntry` via `reverseLedgerEntry` in the same `writeTransaction`
+  (`src/lib/reversals.ts`). A correction is a new row in the same transaction,
+  linked by `Reversal.replacementId`. Chosen over a `reversedAt` column so the
+  rows themselves are truly insert-only.
+- **Every reader skips reversed rows** with the shared `notReversed` filter:
+  costing, month summary, payments/expenses lists (reversed rows shown flagged,
+  excluded from totals), assistant tools, defect analytics, machine quality, QC
+  "newer inspection" check, invoice find-or-create (dispatch and "Generate
+  invoice"), `recomputePaymentStatus`. Reports are therefore the *as-corrected*
+  view; the ledger keeps the dated trail.
+- Invoice "correct" = credit note + re-issue at a corrected price per metre (the
+  order's price follows, trucks re-point to the new invoice). Refused while
+  unreversed payments exist on it — reverse those first.
+- QC "correct" = reverse the inspection (roll falls back to its latest remaining
+  grade or PENDING, order aggregates recomputed, READY buyer alert re-queued via
+  the shared `queueOrderReadyAlert`), then inspect again normally.
+- A wage-payout expense can't be reversed (its approval stands on it). A month
+  whose payout was **approved locks its attendance** (muster save and mark
+  delete return 409) — otherwise wages and the paid bill disagree.
+- **Archive instead of delete** for records with history: `archivedAt` on Buyer,
+  Supplier, YarnType, Worker. Archived = hidden from new-work pickers and
+  refused by create APIs; existing links keep working; restorable. Archived
+  yarn types never raise low-stock alerts. Machines are not archivable yet.
+- Deletes of anything in use → 409 with a reason the UI shows as-is
+  (`src/lib/in-use.ts`). Counts run inside `writeTransaction`.
+- Orders: details editable only while NEW/CONFIRMED (conditional update);
+  buyer/qty/price locked while an active invoice exists; changing qty/GSM/
+  deadline re-runs the stored feasibility (now also stores wastage %) or clears
+  it. Delete only when nothing depends on it; yarn reservations can be released
+  before production starts.
+- Production: work orders re-planned/re-assigned while unfinished, deleted
+  before any output/rolls (order falls back to CONFIRMED). Output entries
+  corrected/removed via `src/lib/production/corrections.ts` — completes or
+  reopens the work order and, for dyeing, the order's production; refused if a
+  later stage already started or the order shipped/closed.
+- Rolls: measurements/shift/lot editable until dispatched; never-inspected rolls
+  deletable. Dispatch truck number correctable.
+- New offline behaviour: corrections, deletes and reversals are **online only**
+  by design (replaying a delete or reversal later against changed data is
+  unsafe); failures show "Couldn't reach the server".
+- Realtime: new `data:changed` event (`emitDataChanged`, ids only).
+
+### Bugs found and fixed on the way
+- Order numbers were `count + 1`; with deletes that collides → now max + 1.
+- `deriveStatus` fell back to NEW when production was undone → CONFIRMED.
+- `postJson` reported network/403/non-JSON failures under `form`, which no form
+  read (errors silently swallowed) → `_form`. Added DELETE support.
+- `Badge` ignored its label (low-stock card showed "reject"/"pass").
+- Assistant tool descriptions, fallback summaries and the Month-end subtitle
+  said profit is booked at first invoice; costing books it when the order
+  finishes shipping.
+- Inputs were unbounded (1 MB names, whitespace-only text, any GSTIN,
+  duplicate roll ids on a truck) → bounded/validated in shared schemas.
+- Orders/Inventory pages had no role guard; `Drawer` had no dialog semantics,
+  Escape or focus handling; field errors weren't linked to inputs.
+
+### Tests
+- New `scripts/verify-crud.ts` (178 checks: roles/sessions, hostile input,
+  every guard and 409, races — concurrent reversals, corrections, order
+  numbers — ledger/payment-status/QC-grade invariants). Shared helpers in
+  `scripts/lib/api-check.ts`; reversal-aware ledger invariants in
+  `scripts/lib/invariants.ts`, also used by `verify-hardening.ts`.
+- Last run (fresh `migrate deploy` + seed, production build, Windows):
+  tsc clean, lint 0 errors, build OK; verify-runtime, verify-integration 65/65,
+  verify-accounts-api 53/53, verify-costing, verify-assistant (mock),
+  verify-module3, verify-hardening 90/90, verify-crud 178/178,
+  verify-order-status 30/30, verify-concurrency 9/9, test-offline-sync,
+  test-offline-conflict, test-backup-restore all pass.
+- **Suite order matters** (pre-existing): hardening approves this month's
+  payout, which now locks this month's attendance, so run
+  `verify-accounts-api` before `verify-hardening`, or reset the DB between
+  them. verify-crud tolerates either order.
+
+### Handoff — what's left
+UI done: Inventory (stock/lots/suppliers with edit/archive/delete), Buyers page
+(`/orders/buyers`), order create/edit/delete + reservation release + cancelled
+invoices + stored feasibility, work-order edit/delete + output-entry
+correct/remove, attendance remove-mark + locked-month notice + archived workers
+off the muster.
+
+Still to do (APIs exist and are tested; only screens missing):
+1. **Payments page**: "Reverse" per payment (reason + optional corrected
+   amount/mode/date → `POST /api/payments/:id/reversal`), "Cancel / re-issue"
+   per invoice (`POST /api/invoices/:id/reversal`, optional `pricePerMetre`);
+   show `reversal` rows flagged. Add a `clientMutationId` to the payment form.
+2. **Expenses page**: "Reverse/correct" (`POST /api/expenses/:id/reversal`),
+   hide it for `isPayout` rows; muted rows for `reversal`.
+3. **Workers page**: Archive/Restore (`PATCH /api/workers/:id {archived}`),
+   show-archived toggle.
+4. **Roll detail / rolls page** (Module 3, uses `any`): edit roll
+   (`PATCH /api/rolls/:id`), delete never-inspected roll, "Reverse" per QC record
+   (`POST /api/rolls/:id/qc/:recordId/reversal`, owner/QC) — records now carry
+   `reversal { reason, reversedByName }`.
+5. **Dispatch page**: truck-number edit (`PATCH /api/dispatches/:id`).
+6. Listen for `data:changed` on Payments/Expenses/QC screens.
+7. Not started: live Ollama verification (WSL Ollama 0.33.2 with llama3.1:8b
+   is reachable from Windows at `http://localhost:11434`; run
+   `BASE=… node scripts/verify-assistant-live.mjs`, then the question/attack
+   list), Playwright UI flows (none in repo; Chromium 1194 is cached locally),
+   add `verify-crud`/`verify-hardening` to `.github/workflows/verify.yml`, then
+   merge to `main`.

@@ -4,6 +4,7 @@ import {
   AT_LEAST_ONE_FIELD,
   archivedFlag,
   atLeastOneField,
+  blankAsUndefined,
   optionalGstin,
   optionalText,
   positiveNumber,
@@ -40,8 +41,8 @@ const orderFields = {
 // Optional: when given, the feasibility check is re-run on save and its
 // result stored on the order (Order.feasibilityResult).
 const feasibilityInputs = {
-  yarnTypeId: z.string().trim().min(1).optional(),
-  wastagePct: z.coerce.number().min(0).max(100).optional(),
+  yarnTypeId: z.preprocess(blankAsUndefined, z.string().trim().min(1).optional()),
+  wastagePct: z.preprocess(blankAsUndefined, z.coerce.number({ error: "Wastage must be a number" }).min(0, "Wastage can't be negative").max(100, "Wastage is at most 100%").optional()),
 };
 
 export const orderCreateSchema = z.object({ ...orderFields, ...feasibilityInputs });

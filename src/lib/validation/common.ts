@@ -32,6 +32,10 @@ export const optionalGstin = z
   .transform((v) => (v ? v : null))
   .refine((v) => v === null || GSTIN_PATTERN.test(v), { message: "GSTIN must be 15 characters, like 27AASFS1234A1Z5" });
 
+/** For optional selects and number boxes: a blank value means "not given"
+ * (a coerced blank would otherwise read as 0). */
+export const blankAsUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+
 /** A positive number with a sanity ceiling, e.g. kg or rupees. */
 export const positiveNumber = (label: string, max: number) =>
   z.coerce
@@ -40,8 +44,9 @@ export const positiveNumber = (label: string, max: number) =>
     .positive(`${label} must be greater than zero`)
     .max(max, `${label} looks too large (at most ${max.toLocaleString("en-IN")})`);
 
-/** PATCH bodies: at least one field, so an empty update is a 400, not a no-op. */
-export const atLeastOneField = <T extends Record<string, unknown>>(value: T) => Object.keys(value).length > 0;
+/** PATCH bodies: at least one field with a value, so an empty (or all-blank)
+ * update is a 400, not a no-op. */
+export const atLeastOneField = <T extends Record<string, unknown>>(value: T) => Object.values(value).some((v) => v !== undefined);
 export const AT_LEAST_ONE_FIELD = { message: "Provide at least one field to update" };
 
 /** `archived: true` archives a record, `false` restores it. */

@@ -6,6 +6,7 @@ import type { z } from "zod";
 // uses for validation, errors keyed by field path (matching the server's
 // `{ fieldErrors }` shape so server errors land on the same fields).
 export function useZodForm<S extends z.ZodTypeAny>(schema: S, initial: Record<string, string>) {
+  const [opened] = useState(initial);
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -21,8 +22,9 @@ export function useZodForm<S extends z.ZodTypeAny>(schema: S, initial: Record<st
     });
   }
 
-  function validate(): z.infer<S> | null {
-    const parsed = schema.safeParse(values);
+  /** Validates the whole form, or just `subset` (an edit's changed fields). */
+  function validate(subset: Record<string, string> = values): z.infer<S> | null {
+    const parsed = schema.safeParse(subset);
     if (parsed.success) {
       setErrors({});
       return parsed.data;
@@ -44,5 +46,11 @@ export function useZodForm<S extends z.ZodTypeAny>(schema: S, initial: Record<st
     };
   }
 
-  return { values, setValues, set, errors, setErrors, submitting, setSubmitting, validate, field };
+  /** Only the fields edited since the form opened — what an edit should
+   * PATCH, so untouched values are never rewritten. */
+  function changed(): Record<string, string> {
+    return Object.fromEntries(Object.entries(values).filter(([k, v]) => v !== (opened[k] ?? "")));
+  }
+
+  return { values, setValues, set, errors, setErrors, submitting, setSubmitting, validate, field, changed };
 }

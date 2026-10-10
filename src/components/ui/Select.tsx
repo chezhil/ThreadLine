@@ -29,6 +29,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             error ? "border-red-400" : "border-border"
           } ${className}`}
           aria-invalid={!!error}
+          aria-describedby={error && selectId ? `${selectId}-error` : undefined}
           {...props}
         >
           {placeholder && (
@@ -42,7 +43,11 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             </option>
           ))}
         </select>
-        {error && <span className="text-xs text-red-600">{error}</span>}
+        {error && (
+          <span id={selectId ? `${selectId}-error` : undefined} className="text-xs text-red-600">
+            {error}
+          </span>
+        )}
       </div>
     );
   },

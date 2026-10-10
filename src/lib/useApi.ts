@@ -5,6 +5,8 @@ export function useApi<T>(url: string) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // HTTP status of the last failed load (404 vs 403 vs 500), null otherwise.
+  const [status, setStatus] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
   const mountedRef = useRef(true);
 
@@ -21,9 +23,13 @@ export function useApi<T>(url: string) {
     async function load() {
       setLoading(true);
       setError(null);
+      setStatus(null);
       try {
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        if (!res.ok) {
+          if (!cancelled) setStatus(res.status);
+          throw new Error(`Request failed (${res.status})`);
+        }
         const json = await res.json();
         if (!cancelled) setData(json);
       } catch (e) {
@@ -43,7 +49,7 @@ export function useApi<T>(url: string) {
     setVersion((v) => v + 1);
   }, []);
 
-  return { data, loading, error, refetch };
+  return { data, loading, error, status, refetch };
 }
 
 /** Never throws: a network failure or a non-JSON reply (an HTML error
