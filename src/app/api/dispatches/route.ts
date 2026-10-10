@@ -8,6 +8,7 @@ import { qualityActor } from "@/lib/quality/auth";
 import { computeInvoiceTotals } from "@/lib/billing";
 import { generateInvoiceNo } from "@/lib/order-numbers";
 import { withRetry } from "@/lib/concurrency";
+import { recomputeDispatchStatus } from "@/lib/order-status";
 
 
 export async function GET(req: NextRequest) {
@@ -174,22 +175,17 @@ export async function POST(req: NextRequest) {
           throw new DispatchConflict();
         }
 
-        // Update Order status to DISPATCHED once every roll that can still ship
-        // has shipped (rejected rolls never ship, so they don't hold it back)
-        const ordersDispatched: { id: string; from: string }[] = [];
+        // Recompute dispatchStatus (and the derived legacy `status`) for
+        // every order touched — NOT_DISPATCHED/PARTIALLY_DISPATCHED/
+        // FULLY_DISPATCHED from the real roll rows, so a buyer taking half an
+        // order first is represented, not just the all-shipped end state.
+        const ordersDispatched: { id: string; from: string; to: string }[] = [];
         const distinctOrderIds = Array.from(new Set(rolls.map((r) => r.orderId)));
         for (const ordId of distinctOrderIds) {
-          const remainingUndispatched = await tx.roll.count({
-            where: { orderId: ordId, dispatchId: null, qcStatus: { not: "REJECT" } },
-          });
           const order = rolls.find((r) => r.orderId === ordId)!.order;
-          if (remainingUndispatched === 0 && order.status !== "DISPATCHED" && order.status !== "CLOSED") {
-            await tx.order.update({
-              where: { id: ordId },
-              data: { status: "DISPATCHED" },
-            });
-            ordersDispatched.push({ id: ordId, from: order.status });
-          }
+          if (order.status === "CLOSED") continue; // terminal, never reopened by a dispatch
+          const { from, to } = await recomputeDispatchStatus(tx, ordId);
+          if (from !== to) ordersDispatched.push({ id: ordId, from, to });
         }
 
         return { dispatch: newDispatch, invoiceId, invoice, invoiceCreated, ordersDispatched };
@@ -208,8 +204,8 @@ export async function POST(req: NextRequest) {
       actor.user.id
     );
     for (const o of ordersDispatched) {
-      await logAudit("Order", o.id, "status_change", { status: o.from }, { status: "DISPATCHED" }, actor.user.id);
-      emit(RealtimeEvents.OrderStatus, { orderId: o.id, status: "DISPATCHED" });
+      await logAudit("Order", o.id, "status_change", { status: o.from }, { status: o.to }, actor.user.id);
+      emit(RealtimeEvents.OrderStatus, { orderId: o.id, status: o.to });
     }
 
     emit(RealtimeEvents.DispatchCompleted, { dispatchId: dispatch.id, truckNo, rollCount: rollIds.length });

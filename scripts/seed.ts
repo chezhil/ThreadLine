@@ -4,6 +4,12 @@ import bcrypt from "bcryptjs";
 import { seedProduction } from "./seed-production";
 import { seedQuality } from "./seed-quality";
 import { seedAccounts } from "./seed-accounts";
+import {
+  recomputeProductionStatus,
+  recomputeQcStatus,
+  recomputeDispatchStatus,
+  recomputePaymentStatus,
+} from "../src/lib/order-status";
 
 const db = new PrismaClient();
 
@@ -155,6 +161,26 @@ async function main() {
   // it reads the orders, machines, lots and invoices seeded above.
   // ---------------------------------------------------------------------
   await seedAccounts(db);
+
+  // ---------------------------------------------------------------------
+  // All four modules write Order fields directly via Prisma (not through
+  // the API), so the granular status fields added for the status-split
+  // feature (productionStatus/qcStatus/dispatchStatus/paymentStatus) never
+  // got touched above — they're still sitting at their schema defaults
+  // regardless of how far along each seeded order actually is. Recompute
+  // them for real from the Roll/Invoice/Payment rows just seeded, using the
+  // exact same logic the app uses on every write (src/lib/order-status.ts),
+  // so demo data is internally consistent.
+  console.log("Recomputing order status fields from seeded production/QC/dispatch/payment data...");
+  const allOrderIds = (await db.order.findMany({ select: { id: true } })).map((o) => o.id);
+  for (const orderId of allOrderIds) {
+    await db.$transaction(async (tx) => {
+      await recomputeProductionStatus(tx, orderId);
+      await recomputeQcStatus(tx, orderId);
+      await recomputeDispatchStatus(tx, orderId);
+      await recomputePaymentStatus(tx, orderId);
+    });
+  }
 
   console.log("Seed complete.");
 }

@@ -392,3 +392,87 @@ only what got built: item 1 of that file.
   scoped in detail but **not built** — see the addendum for why each one was
   judged too invasive to rush blind into a shared branch, and what order to
   tackle them in.
+
+---
+
+## Order status split (Chezhil, Claude)
+
+Item 2 of `../HARDENING_ADDENDUM.md`. Branched from `feature/concurrency-
+safety` (merged in first) rather than `main`, since this touches the same
+`dispatches`/`invoices` write paths item 1 just fixed — building on the
+unfixed version would have reintroduced that race or duplicated the fix.
+
+### What AI generated
+- Migration adding `productionStatus`/`qcStatus`/`dispatchStatus`/
+  `paymentStatus` to `Order`, with a best-effort SQL backfill from the
+  legacy `status` value for any pre-existing rows (can't know about partial
+  dispatch/payment from `status` alone — real data gets a proper recompute).
+- `src/lib/order-status.ts`: `deriveStatus()` (pure function, legacy
+  `status` from the four granular fields) plus one apply/recompute helper
+  per real-world event — production started/completed, QC result changed,
+  a dispatch happened, a payment was recorded — each meant to be called from
+  inside the caller's own transaction.
+- Rewired every write site: `work-orders`, `production-logs`,
+  `rolls/:id/qc`, `dispatches`, `payments`, and the `orders/:id` PATCH
+  endpoint (cut down to only `NEW→CONFIRMED` and `DISPATCHED→CLOSED`).
+- `scripts/verify-order-status.ts` (21 checks) and a backfill pass added to
+  the end of `scripts/seed.ts` (all four seed scripts write Order fields
+  directly via Prisma, never through the API, so the granular fields would
+  otherwise sit at their schema defaults regardless of how far along each
+  seeded order actually is).
+
+### What a human reviewed/changed
+- **Audited before touching anything**: grepped every `order.status` write
+  site across all four modules' merged code before designing the schema,
+  rather than guessing at the blast radius. That audit is what surfaced the
+  two bugs the user asked to fix in the same pass — `work-orders/route.ts`
+  and `production-logs/route.ts` both wrote `status` directly, bypassing
+  whatever validation lived in the PATCH endpoint.
+- **Found a third issue while fixing those two, not assumed**: reading the
+  PATCH endpoint closely showed it had no precondition checks at all for
+  QC/READY/DISPATCHED — an owner could "Advance" an order straight to
+  DISPATCHED with zero rolls produced, inspected, or shipped. Removed that
+  manual path entirely rather than patching around it.
+- **First test run caught real bugs in the test, not the feature**: the
+  initial `verify-order-status.ts` run failed 6 of 21 checks. Traced each
+  one before concluding anything: "machine already has an active work
+  order" was the test reusing a seeded machine that was already busy, not a
+  product bug — fixed by creating a dedicated machine per run.
+  "dispatchStatus should be FULLY_DISPATCHED but stayed PARTIALLY_DISPATCHED"
+  turned out to be correct behavior — the seeded order the test picked still
+  had REWORK rolls sitting un-dispatched, which correctly blocks
+  "fully shipped." Rewrote sections C/D to use fully self-contained roll
+  fixtures (2 PASS + 1 REJECT, created directly, to also prove REJECT
+  doesn't block completion) instead of depending on fragile shared seed
+  state. Reran clean: 21/21.
+- **Verified the QC aggregation live, not just via the script**: logged in
+  as owner, found a real order with one inspected + one pending roll via a
+  direct DB query, called `POST /api/rolls/:id/qc` against the running
+  server for the pending one, and confirmed via a fresh DB read that
+  `Order.qcStatus` flipped from `PENDING` to `PASS` only once *both* rolls
+  were inspected — not after the first one, which would have been wrong.
+- Checked the UI after the backend, not instead of it: logged into `/orders/
+  :id` and confirmed the four badges render with sensible colours (added
+  `not_started`/`in_production`/`done`/`needs_rework`/`not_dispatched`/
+  `partially_dispatched`/`fully_dispatched`/`unpaid`/`partial`/`paid` to the
+  shared `statusColor` token map in `src/lib/tokens.ts` — they'd have all
+  silently rendered grey otherwise, since unrecognised keys fall back to
+  grey by design) and that the "Advance" button correctly disappears once
+  there's nothing left for a person to manually do.
+
+### Known gaps / honest status
+- The seeded demo data has a pre-existing cross-script looseness this
+  surfaced but didn't cause: several orders seeded as already `DISPATCHED`/
+  `CLOSED` have `productionStatus` recomputed to `IN_PRODUCTION` rather than
+  `DONE`, because `scripts/seed-production.ts`'s `WorkOrder` rows for those
+  orders were never marked fully `COMPLETED`, independently of what
+  `scripts/seed-quality.ts` did with their rolls. The recompute pass reports
+  this honestly (it derives from real rows, so it can't paper over it) —
+  worth reconciling in a seed-data pass, not a product bug.
+- No explicit "dispatched quantity exceeds order.qtyMetres" check — dispatch
+  is still bounded by which `Roll` rows exist for the order, not by a
+  metres comparison. Flagged in the addendum's failure-case matrix (row 2).
+- `paymentStatus` reads directly from `Payment`/`Invoice` sums rather than
+  from item 3's (not-yet-built) ledger — noted in the addendum as the thing
+  to point at the ledger once it exists, so there's one source of truth for
+  money figures instead of two.

@@ -5,6 +5,7 @@ import { handleZodError } from "@/lib/validation/format-errors";
 import { logAudit } from "@/lib/audit";
 import { emit, RealtimeEvents } from "@/lib/realtime";
 import { qualityActor } from "@/lib/quality/auth";
+import { recomputeQcStatus } from "@/lib/order-status";
 
 export async function POST(
   req: NextRequest,
@@ -48,9 +49,10 @@ export async function POST(
 
     const previousStatus = roll.qcStatus;
 
-    // Create the QC record and update the roll status atomically
-    const [qcRecord, updatedRoll] = await db.$transaction([
-      db.qCRecord.create({
+    // Create the QC record, update the roll, and recompute the order-level
+    // qcStatus aggregate, all atomically.
+    const { qcRecord, updatedRoll } = await db.$transaction(async (tx) => {
+      const qcRecord = await tx.qCRecord.create({
         data: {
           rollId: roll.id,
           // The signed-in inspector, never a client-supplied id.
@@ -59,8 +61,8 @@ export async function POST(
           defects: JSON.stringify(data.defects || []),
           notes: data.notes || null,
         },
-      }),
-      db.roll.update({
+      });
+      const updatedRoll = await tx.roll.update({
         where: { id: roll.id },
         data: {
           qcStatus: data.result,
@@ -70,8 +72,10 @@ export async function POST(
           machine: true,
           yarnLot: true,
         },
-      }),
-    ]);
+      });
+      await recomputeQcStatus(tx, updatedRoll.orderId);
+      return { qcRecord, updatedRoll };
+    });
 
     await logAudit(
       "Roll",

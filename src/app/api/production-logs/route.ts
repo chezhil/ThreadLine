@@ -6,6 +6,7 @@ import { productionLogSchema } from "@/lib/validation/production";
 import { productionActor } from "@/lib/production/auth";
 import { fieldError, jsonBody, problem } from "@/lib/production/http";
 import { refreshProductionAlerts } from "@/lib/production/insights";
+import { applyProductionCompleted } from "@/lib/order-status";
 
 export async function POST(request: Request) {
   const actor = await productionActor();
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
         const stages = await tx.workOrder.findMany({ where: { orderId: workOrder.orderId }, select: { stage: true, status: true } });
         const allDone = ["spinning", "weaving", "dyeing"].every((stage) => stages.some((row) => row.stage === stage && row.status === "COMPLETED"));
         if (allDone) {
-          await tx.order.update({ where: { id: workOrder.orderId }, data: { status: "QC" } });
+          await applyProductionCompleted(tx, workOrder.orderId);
           orderToQc = true;
         }
       }

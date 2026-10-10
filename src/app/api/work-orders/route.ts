@@ -6,6 +6,7 @@ import { workOrderSchema } from "@/lib/validation/production";
 import { productionActor } from "@/lib/production/auth";
 import { fieldError, jsonBody, problem } from "@/lib/production/http";
 import { refreshProductionAlerts } from "@/lib/production/insights";
+import { applyProductionStarted } from "@/lib/order-status";
 
 const machineTypeForStage = { spinning: "spinning", weaving: "loom", dyeing: "dyeing" } as const;
 const previousStage = { spinning: null, weaving: "spinning", dyeing: "weaving" } as const;
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
       if (busy) throw new ProductionError("machineId", "Machine already has an active work order");
       const workOrder = await tx.workOrder.create({ data: { ...input, producedQty: 0, status: "PLANNED" } });
       const statusChanged = order.status === "CONFIRMED";
-      if (statusChanged) await tx.order.update({ where: { id: order.id }, data: { status: "IN_PRODUCTION" } });
+      if (statusChanged) await applyProductionStarted(tx, order.id);
       return { workOrder, statusChanged, orderNo: order.orderNo };
     });
     await logAudit("WorkOrder", result.workOrder.id, "CREATE", null, result.workOrder, actor.user.id);

@@ -6,6 +6,7 @@ import { monthQuerySchema, paymentSchema } from "@/lib/validation/accounts";
 import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from "@/lib/accounts/http";
 import { notify } from "@/lib/accounts/alerts";
 import { currentMonthKey, istDateKey, monthRange } from "@/lib/accounts/period";
+import { recomputePaymentStatus } from "@/lib/order-status";
 
 const formatINR = (n: number) =>
   n.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -112,6 +113,7 @@ export async function POST(req: NextRequest) {
       const created = await tx.payment.create({ data: { invoiceId, amount, mode, receivedAt: at } });
       const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");
+      await recomputePaymentStatus(tx, invoice.orderId);
       return created;
     });
   } catch (e) {

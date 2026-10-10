@@ -10,6 +10,17 @@ export const statusColor = {
   reject: "red",
   maintenance: "red",
   pending: "grey",
+  // Order-level granular statuses (src/lib/order-status.ts)
+  not_started: "grey",
+  in_production: "amber",
+  done: "green",
+  needs_rework: "amber",
+  not_dispatched: "grey",
+  partially_dispatched: "amber",
+  fully_dispatched: "green",
+  unpaid: "red",
+  partial: "amber",
+  paid: "green",
 } as const;
 
 export type StatusColorKey = keyof typeof statusColor;

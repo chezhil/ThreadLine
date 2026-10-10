@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { Button, Input, Select, Badge, Card, CardHeader } from "@/components/ui";
 import { useApi, postJson } from "@/lib/useApi";
-import { ORDER_STATUSES } from "@/lib/tokens";
 
 interface YarnLot {
   id: string;
@@ -21,6 +20,10 @@ interface OrderDetail {
   orderNo: string;
   trackingToken: string;
   status: string;
+  productionStatus: string;
+  qcStatus: string;
+  dispatchStatus: string;
+  paymentStatus: string;
   buyer: { name: string };
   fabricType: string;
   colour: string;
@@ -44,14 +47,18 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
   if (!order.data) return <p className="text-sm text-red-600">Order not found.</p>;
 
   const o = order.data.order;
-  const currentIdx = ORDER_STATUSES.indexOf(o.status as (typeof ORDER_STATUSES)[number]);
-  const nextStatus = ORDER_STATUSES[currentIdx + 1];
   const trackingUrl = typeof window !== "undefined" ? `${window.location.origin}/track/${o.trackingToken}` : "";
 
+  // Only these two are a person's decision; everything else in ORDER_STATUSES
+  // is computed from real production/QC/dispatch events (src/lib/order-status.ts)
+  // and shown below as read-only badges instead of an "Advance" button.
+  const manualAction =
+    o.status === "NEW" ? "CONFIRMED" : o.status === "DISPATCHED" ? "CLOSED" : null;
+
   async function advanceStatus() {
-    if (!nextStatus) return;
+    if (!manualAction) return;
     setStatusError(null);
-    const { ok, fieldErrors } = await postJson(`/api/orders/${orderId}`, { status: nextStatus }, "PATCH");
+    const { ok, fieldErrors } = await postJson(`/api/orders/${orderId}`, { status: manualAction }, "PATCH");
     if (!ok) {
       setStatusError(Object.values(fieldErrors ?? {})[0]?.[0] ?? "Could not update status");
       return;
@@ -113,11 +120,25 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
 
       <Card>
         <CardHeader title="Status" />
+        <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm md:grid-cols-4">
+          <dt className="text-gray-500">Production</dt>
+          <dd><Badge status={o.productionStatus} /></dd>
+          <dt className="text-gray-500">Quality</dt>
+          <dd><Badge status={o.qcStatus} /></dd>
+          <dt className="text-gray-500">Dispatch</dt>
+          <dd><Badge status={o.dispatchStatus} /></dd>
+          <dt className="text-gray-500">Payment</dt>
+          <dd><Badge status={o.paymentStatus} /></dd>
+        </dl>
         <div className="flex items-center gap-3">
-          {nextStatus ? (
-            <Button onClick={advanceStatus}>Advance to {nextStatus.replace(/_/g, " ")}</Button>
+          {manualAction ? (
+            <Button onClick={advanceStatus}>
+              {manualAction === "CONFIRMED" ? "Confirm order" : "Close order"}
+            </Button>
           ) : (
-            <p className="text-sm text-gray-500">Order is in its final status.</p>
+            <p className="text-sm text-gray-500">
+              Updates automatically as production, QC and dispatch happen — see the badges above.
+            </p>
           )}
           {statusError && <p className="text-sm text-red-600">{statusError}</p>}
         </div>

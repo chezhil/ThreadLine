@@ -73,7 +73,11 @@ model Order {
   qtyMetres         Float
   pricePerMetre     Float
   deadline          DateTime
-  status            String // NEW|CONFIRMED|IN_PRODUCTION|QC|READY|DISPATCHED|CLOSED
+  status            String // NEW|CONFIRMED|IN_PRODUCTION|QC|READY|DISPATCHED|CLOSED — derived display value, see src/lib/order-status.ts. Only NEW->CONFIRMED and DISPATCHED->CLOSED are set directly; everything in between is computed from the four fields below.
+  productionStatus  String                 @default("NOT_STARTED") // NOT_STARTED|IN_PRODUCTION|DONE
+  qcStatus          String                 @default("PENDING") // PENDING|PASS|NEEDS_REWORK — aggregated from this order's Roll.qcStatus, not set directly
+  dispatchStatus    String                 @default("NOT_DISPATCHED") // NOT_DISPATCHED|PARTIALLY_DISPATCHED|FULLY_DISPATCHED
+  paymentStatus     String                 @default("UNPAID") // UNPAID|PARTIAL|PAID — derived from this order's Invoice/Payment rows
   trackingToken     String                 @unique
   feasibilityResult String?
   createdAt         DateTime               @default(now())
