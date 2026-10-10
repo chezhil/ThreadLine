@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { LogoutButton } from "./LogoutButton";
 import type { Role } from "@/lib/auth";
 import { navForRole } from "./nav-config";
 
@@ -37,28 +38,5 @@ export function Sidebar({ role, userName }: { role: Role; userName: string }) {
         <LogoutButton />
       </div>
     </aside>
-  );
-}
-
-function LogoutButton() {
-  const router = useRouter();
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        await fetch("/api/auth/logout", { method: "POST" });
-        // The offline service worker keeps copies of pages and roll lists; don't
-        // leave them for whoever signs in next on this device.
-        if ("caches" in window) {
-          const keys = await caches.keys().catch(() => [] as string[]);
-          await Promise.all(keys.filter((k) => k.startsWith("threadline-")).map((k) => caches.delete(k)));
-        }
-        router.push("/login");
-        router.refresh();
-      }}
-      className="w-full rounded-md border border-border px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
-    >
-      Sign out
-    </button>
   );
 }

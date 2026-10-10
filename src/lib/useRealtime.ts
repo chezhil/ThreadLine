@@ -6,10 +6,21 @@ import type { RealtimeEvent } from "./realtime";
 let socket: Socket | undefined;
 
 function getSocket(): Socket {
-  if (!socket) {
+  // The server refuses a handshake without a session and socket.io doesn't
+  // retry a refused one, so a socket that gave up is replaced (e.g. after
+  // signing in again in the same tab).
+  if (!socket || (!socket.connected && !socket.active)) {
+    socket?.removeAllListeners();
     socket = io({ path: "/api/socketio" });
   }
   return socket;
+}
+
+/** Close the realtime connection (on sign-out), so the next user's session
+ * opens its own. */
+export function disconnectRealtime() {
+  socket?.disconnect();
+  socket = undefined;
 }
 
 export function useRealtimeEvent<T = unknown>(

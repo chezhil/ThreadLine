@@ -6,6 +6,8 @@
 const { createServer } = require("http");
 const next = require("next");
 const { Server } = require("socket.io");
+const { createHash } = require("crypto");
+const { PrismaClient } = require("@prisma/client");
 
 const dev = process.env.NODE_ENV !== "production";
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -21,6 +23,26 @@ app.prepare().then(() => {
   const io = new Server(httpServer, { path: "/api/socketio" });
   globalThis.__threadlineIO = io;
 
+  // Only signed-in users receive realtime events (orders, rolls, stock and
+  // payment notices): the handshake must carry a live session cookie, checked
+  // the same way as src/lib/auth.ts (sha256 of the token in Session).
+  const sessionDb = new PrismaClient();
+  globalThis.__threadlineSocketDb = sessionDb; // the restore route reconnects it
+  io.use(async (socket, nextMiddleware) => {
+    try {
+      const token = readCookie(socket.handshake.headers.cookie, "threadline_session");
+      if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return nextMiddleware(new Error("unauthorized"));
+      const tokenHash = createHash("sha256").update(token).digest("hex");
+      const session = await sessionDb.session.findUnique({ where: { tokenHash } });
+      if (!session || session.expiresAt <= new Date()) return nextMiddleware(new Error("unauthorized"));
+      socket.data.userId = session.userId;
+      nextMiddleware();
+    } catch (err) {
+      console.error("[realtime] handshake check failed:", err);
+      nextMiddleware(new Error("unauthorized"));
+    }
+  });
+
   io.on("connection", (socket) => {
     socket.on("disconnect", () => {});
   });
@@ -29,3 +51,12 @@ app.prepare().then(() => {
     console.log(`> ThreadLine ready on http://localhost:${port}`);
   });
 });
+
+function readCookie(header, name) {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
