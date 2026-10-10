@@ -863,3 +863,39 @@ Still to do (APIs exist and are tested; only screens missing):
    list), Playwright UI flows (none in repo; Chromium 1194 is cached locally),
    add `verify-crud`/`verify-hardening` to `.github/workflows/verify.yml`, then
    merge to `main`.
+
+
+---
+
+## App shell, profile & settings (devacharan-cu, Claude)
+
+### What AI generated
+Sidebar collapse + brand link, the account menu, `/profile` (five tabs), the
+`/api/me/*` routes (profile, preferences, password, sessions, activity), dark
+theme tokens, the command menu / shortcuts / toasts / route progress bar,
+replacement of the default Next.js favicon with ThreadLine's icon set, and
+`verify-account.ts` + `tests/e2e/account.spec.ts`.
+
+### What a human should know / bugs found while testing
+- **`.partial()` does not drop `.default()` in zod**: the first version of the
+  preferences PATCH schema filled every omitted key with its default, so each
+  toggle reset all the other preferences. Caught by a real request, not by
+  `tsc`. The fields are now defined without defaults (`src/lib/preferences.ts`)
+  and `verify-account.ts` has a regression check ("a later save keeps earlier
+  choices").
+- **Default Next.js `app/favicon.ico`** beat the SVG icon in `metadata`, which
+  is why the tab showed the Next.js logo. Removed; PNG icons added for iOS/PWA.
+- **`bg-white` + dark mode**: `bg-white` is a fixed colour, not a token, so the
+  dark theme remaps it with explicit rules in `globals.css` (`theme-dark-fixed`)
+  rather than overriding `--color-white` (which would also break `text-white`).
+  Module 2's `production.css` hard-coded hex colours; they now use the shared
+  tokens so the floor board follows the theme.
+- `getCurrentUser()` is called on every API request, so it deliberately does
+  not load the profile row (which can hold a ~30 KB avatar); use
+  `getCurrentProfile()` (cached per request) where the profile is needed.
+- Preferences are written inside a transaction with `SELECT … FOR UPDATE`, and
+  the client batches changes (400 ms) and flushes with `sendBeacon` on page hide.
+- Password change: current password required, 5 wrong tries / 15 min per user
+  (in memory), all other sessions revoked, audited without the password.
+- Verified: `verify-account.ts` (all checks), `account.spec.ts` (10 UI flows),
+  full verify suite and the existing Playwright smoke tests.

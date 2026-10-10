@@ -18,6 +18,8 @@ const pages = [
   "/alerts",
   "/audit",
   "/assistant",
+  "/profile",
+  "/profile?tab=security",
 ];
 
 const login = await fetch(`${BASE}/api/auth/login`, {

@@ -17,6 +17,15 @@ model User {
   role              String // owner | storekeeper | floor_supervisor | qc_inspector
   passwordHash      String
   createdAt         DateTime           @default(now())
+  // Profile (all optional) and per-user interface preferences (JSON, see
+  // src/lib/preferences.ts). `name` stays the sign-in username.
+  fullName          String?
+  email             String?
+  phone             String?
+  jobTitle          String?
+  avatar            String? // small resized image as a data: URL
+  preferences       String             @default("{}")
+  lastLoginAt       DateTime?
   sessions          Session[]
   notificationReads NotificationRead[]
 }
@@ -27,6 +36,7 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  userAgent String?
 
   @@index([userId])
   @@index([expiresAt])

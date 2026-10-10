@@ -43,7 +43,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen bg-background lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+    // Not signed in yet, so there is no saved preference: follow the device.
+    <div data-theme="system" className="grid min-h-screen bg-background text-foreground lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       {/* Brand panel — the mill's control-room navy, with a woven warp/weft texture. */}
       <section className="relative hidden overflow-hidden bg-brand text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
         <div
@@ -55,6 +56,23 @@ export default function LoginPage() {
           aria-hidden="true"
         />
         <div className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-brand-tint/40 blur-3xl" aria-hidden="true" />
+
+        {/* A slowly turning bolt of woven cloth: six faces of warp and weft in 3D. */}
+        <div className="pointer-events-none absolute right-14 top-14 h-28 w-28 [perspective:700px]" aria-hidden="true">
+          <div className="relative h-full w-full animate-cube-spin [transform-style:preserve-3d]">
+            {["rotateY(0deg)", "rotateY(90deg)", "rotateY(180deg)", "rotateY(270deg)", "rotateX(90deg)", "rotateX(-90deg)"].map((face) => (
+              <span
+                key={face}
+                className="absolute inset-0 border border-white/30 bg-white/[0.07]"
+                style={{
+                  transform: `${face} translateZ(3.5rem)`,
+                  backgroundImage:
+                    "repeating-linear-gradient(90deg, rgb(255 255 255 / 0.35) 0 2px, transparent 2px 14px), repeating-linear-gradient(0deg, rgb(168 184 255 / 0.4) 0 2px, transparent 2px 14px)",
+                }}
+              />
+            ))}
+          </div>
+        </div>
 
         <div className="relative flex items-center gap-3">
           <BrandMark className="h-10 w-10 ring-1 ring-white/20" />

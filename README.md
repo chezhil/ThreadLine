@@ -47,6 +47,7 @@ Open http://localhost:3000. Seeded demo logins (see `scripts/seed.ts`):
   - `BASE=http://localhost:3000 npx tsx scripts/verify-order-status.ts` — derived order status (production/QC/dispatch/payment)
   - `BASE=http://localhost:3000 npx tsx scripts/verify-concurrency.ts` — stock reservation, dispatch and invoice numbering under concurrent writes
   - `BASE=http://localhost:3000 npx tsx scripts/verify-crud.ts` — edit/archive/delete/reverse-and-correct across every module (178 checks). Run `verify-accounts-api` before this (or reset the DB between them): it approves this month's wage payout, which locks that month's attendance.
+  - `npx tsx scripts/verify-account.ts` — profile, preferences, password and session endpoints (`/api/me/*`)
   - `npx tsx scripts/verify-whatsapp-preview.ts` — WhatsApp dispatch message: server-built text, role gate, rate limit
   - `npx tsx scripts/verify-whatsapp-cloud.ts` — Cloud API delivery and the receipt webhook, against a stand-in for Meta's API
   - `npx playwright test` — UI smoke suite, one golden path per module (`playwright.config.ts`, `tests/e2e/`); needs the app already running (`BASE` env, defaults to `http://localhost:3000`). Business-logic coverage lives in the `verify-*` scripts above; these just catch the UI failing to render or wire up to a working API.
@@ -81,3 +82,9 @@ The exported [executive dashboard](design/stitch/README.md) is available at
 4. Submit the two templates above; set the template env vars once they are approved.
 5. Set `ALERT_WORKER_TOKEN` (any long random string): the web process then drains the outbox every 15 s by itself. (Alternatively run `npm run alerts:worker` as a second service.)
 6. Check `/api/health` shows `"whatsapp": true`, dispatch a test order to your own number, and watch it go Delivered → Read on the Alerts page outbox card.
+
+## App shell and account
+
+- **Profile & settings** (`/profile`, tabs: Profile, Preferences, Notifications, Security, Activity) — open it from the avatar menu in the header. Sign-out lives in that menu. Profile photo (resized in the browser), name/email/phone, theme (light / dark / follow the device), text size, reduced motion, 12/24-hour clock, start page, alert pop-ups and sound, password change, and signed-in devices with remote sign-out. Preferences are stored per user in the database and rendered on the server, so there is no flash of the wrong theme.
+- **Command menu** (`Ctrl/Cmd + K`): jump to any page or order, switch theme, sign out. **Shortcuts:** `?` lists them, `[` collapses the sidebar, `G` then a letter goes to a page.
+- The ThreadLine logo and name in the sidebar (and the logo on phones) go to your home page; the ☰ button collapses the sidebar to an icon rail.

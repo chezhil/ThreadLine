@@ -24,7 +24,15 @@ export const metadata: Metadata = {
   title: "ThreadLine",
   description: "Everest Textile Mills — any order, any roll, any rupee, in seconds.",
   manifest: "/manifest.json",
-  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  // The default Next.js favicon.ico was removed: browsers prefer it over the
+  // SVG below, which put the Next.js logo in the tab.
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: "/apple-icon.png",
+  },
 };
 
 export const viewport: Viewport = {
