@@ -48,25 +48,31 @@ export function useApi<T>(url: string) {
 
 /** Never throws: a network failure or a non-JSON reply (an HTML error
  * page, an empty 502) comes back as ok: false with an error message, so the
- * caller's "saving…" state is always cleared. */
+ * caller's "saving…" state is always cleared. A failure without field errors
+ * is reported under `_form`, the key the API uses for whole-form errors. */
 export async function postJson<T = unknown>(
   url: string,
   body: unknown,
-  method: "POST" | "PATCH" = "POST",
+  method: "POST" | "PATCH" | "DELETE" = "POST",
 ): Promise<{ ok: boolean; data: T; fieldErrors?: Record<string, string[]>; error?: string }> {
   let res: Response;
   try {
     res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
     const error = "Couldn't reach the server. Check the connection and try again.";
-    return { ok: false, data: { error } as T, fieldErrors: { form: [error] }, error };
+    return { ok: false, data: { error } as T, fieldErrors: { _form: [error] }, error };
   }
   const data = (await res.json().catch(() => null)) as (T & { error?: string; fieldErrors?: Record<string, string[]> }) | null;
   const error = res.ok ? undefined : (data?.error ?? `Request failed (${res.status})`);
-  const fieldErrors = data?.fieldErrors ?? (res.ok ? undefined : { form: [error!] });
+  const fieldErrors = data?.fieldErrors ?? (res.ok ? undefined : { _form: [error!] });
   return { ok: res.ok, data: (data ?? ({ error } as T)) as T, fieldErrors, error };
+}
+
+/** The first message of a failed postJson, for one-line error banners. */
+export function firstError(res: { fieldErrors?: Record<string, string[]>; error?: string }, fallback: string): string {
+  return Object.values(res.fieldErrors ?? {}).flat()[0] ?? res.error ?? fallback;
 }

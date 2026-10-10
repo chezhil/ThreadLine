@@ -16,7 +16,7 @@ export function summarize(tool: string, d: any): string {
       const realised: any[] = d.realisedOrders ?? [];
       const wip: any[] = d.inProgressOrders ?? [];
       if (!realised.length) {
-        return `No order was invoiced in ${d.monthLabel}, so no order profit is booked for that month yet.${
+        return `No order finished in ${d.monthLabel}, so no order profit is booked for that month yet.${
           wip.length ? ` ${plural(wip.length, "order")} in progress had activity then (cost to date only, not final profit).` : ""
         }`;
       }
@@ -24,8 +24,8 @@ export function summarize(tool: string, d: any): string {
       const high = realised[realised.length - 1];
       const gaps = low.dataGaps?.length ? ` Note for ${low.orderNo}: ${low.dataGaps.join(" ")}` : "";
       const lowLine = `${low.orderNo} (${low.buyer}) made the least profit in ${d.monthLabel}: ${inr(low.profit)} on revenue of ${inr(low.revenue)} against a true cost of ${inr(low.totalCost)} (margin ${pct(low.marginPct)}).`;
-      if (realised.length === 1) return `${lowLine} It is the only order invoiced that month.${gaps}`;
-      return `${lowLine} The most profitable was ${high.orderNo} (${high.buyer}) at ${inr(high.profit)} (margin ${pct(high.marginPct)}). ${plural(realised.length, "order")} were invoiced that month.${gaps}`;
+      if (realised.length === 1) return `${lowLine} It is the only order that finished that month.${gaps}`;
+      return `${lowLine} The most profitable was ${high.orderNo} (${high.buyer}) at ${inr(high.profit)} (margin ${pct(high.marginPct)}). ${plural(realised.length, "order")} finished that month.${gaps}`;
     }
     case "orderCost": {
       if (!d.found) return `I couldn't find order ${d.orderNo} in the records.`;
@@ -39,8 +39,8 @@ export function summarize(tool: string, d: any): string {
     case "monthSummary": {
       const p = d.pnl;
       const booked = p.ordersRealised
-        ? `${plural(p.ordersRealised, "order")} invoiced: revenue ${inr(p.revenue)}, cost of those orders ${inr(p.costOfOrders)}, unabsorbed overhead ${inr(p.unabsorbedPeriodCost)}, net profit ${inr(p.netProfit)} (margin ${pct(p.marginPct)}).`
-        : `No order was invoiced in ${d.label}, so no profit is booked yet${p.unabsorbedPeriodCost ? ` (unabsorbed overhead ${inr(p.unabsorbedPeriodCost)})` : ""}.`;
+        ? `${plural(p.ordersRealised, "order")} finished: revenue ${inr(p.revenue)}, cost of those orders ${inr(p.costOfOrders)}, unabsorbed overhead ${inr(p.unabsorbedPeriodCost)}, net profit ${inr(p.netProfit)} (margin ${pct(p.marginPct)}).`
+        : `No order finished in ${d.label}, so no profit is booked yet${p.unabsorbedPeriodCost ? ` (unabsorbed overhead ${inr(p.unabsorbedPeriodCost)})` : ""}.`;
       return `${d.label}: ${booked} Payments received ${inr(d.cash.paymentsReceived)}, expenses recorded ${inr(d.cash.expensesTotal)}, wages earned per attendance ${inr(d.wages.accrued)}. Receivables outstanding: ${inr(d.receivables.outstanding)} across ${plural(d.receivables.invoicesOpen, "invoice")}.`;
     }
     case "machineOutput": {

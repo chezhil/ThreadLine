@@ -66,9 +66,12 @@ export const workerSchema = z.object({
 });
 export type WorkerInput = z.infer<typeof workerSchema>;
 
-export const workerUpdateSchema = workerSchema.partial().refine((v) => Object.keys(v).length > 0, {
-  message: "Provide at least one field to update",
-});
+export const workerUpdateSchema = workerSchema
+  .partial()
+  .extend({ archived: z.boolean({ error: "archived must be true or false" }).optional() })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Provide at least one field to update",
+  });
 
 export const attendanceEntrySchema = z
   .object({
@@ -120,6 +123,35 @@ export const paymentSchema = z.object({
   clientMutationId: z.string().min(1).max(100).optional(),
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
+
+// Reverse-and-correct (see the Reversal model): the reason is kept with the
+// reversal; an optional correction is recorded as a new row in the same
+// transaction.
+const reversalReason = z
+  .string({ error: "Say why this is being reversed" })
+  .trim()
+  .min(3, "Say why this is being reversed")
+  .max(300, "Keep the reason under 300 characters");
+
+export const paymentReversalSchema = z.object({
+  reason: reversalReason,
+  correction: paymentSchema.pick({ amount: true, mode: true, receivedAt: true }).optional(),
+});
+export type PaymentReversalInput = z.infer<typeof paymentReversalSchema>;
+
+export const expenseReversalSchema = z.object({
+  reason: reversalReason,
+  correction: expenseSchema.optional(),
+});
+export type ExpenseReversalInput = z.infer<typeof expenseReversalSchema>;
+
+export const invoiceReversalSchema = z.object({
+  reason: reversalReason,
+  // Re-issue at this price per metre (a credit note plus a corrected invoice);
+  // omit to cancel the invoice outright.
+  correction: z.object({ pricePerMetre: money("Price per metre").refine((n) => n <= 100_000, { message: "Price per metre looks too large" }) }).optional(),
+});
+export type InvoiceReversalInput = z.infer<typeof invoiceReversalSchema>;
 
 export const monthQuerySchema = z
   .string()

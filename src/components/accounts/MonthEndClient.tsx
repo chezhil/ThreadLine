@@ -32,7 +32,7 @@ export function MonthEndClient() {
     <div className="flex flex-col gap-4">
       <PageTitle
         title="Month-end summary"
-        subtitle="Profit is booked when an order is first invoiced. Every figure is computed from attendance, expenses, payments, rolls and production rows."
+        subtitle="Profit is booked in the month an order finishes (its last truck leaves). Every figure is computed from attendance, expenses, payments, rolls and production rows."
         action={
           <div className="flex items-center gap-2 print:hidden">
             <MonthPicker month={month} onChange={setMonth} max={thisMonth} />

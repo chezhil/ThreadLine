@@ -10,6 +10,7 @@ import type { Prisma } from "@prisma/client";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { recomputeRollAggregates, recordStatusChanges } from "@/lib/order-status";
 import { presentRolls, rollInclude } from "@/lib/quality/roll-view";
+import { lotServesOrder } from "@/lib/quality/lineage";
 
 
 export async function GET(req: NextRequest) {
@@ -99,28 +100,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Lineage must be consistent: the roll comes off a WEAVING work order of
-    // this order, on that work order's loom, from yarn reserved for (or
-    // received against, or already used by) this order.
-    const [workOrder, machine, yarnLot] = await Promise.all([
+    // this order, on that work order's loom, from this order's yarn.
+    const [workOrder, machine, lot] = await Promise.all([
       db.workOrder.findUnique({ where: { id: data.workOrderId } }),
       db.machine.findUnique({ where: { id: data.machineId } }),
-      db.yarnLot.findUnique({ where: { id: data.yarnLotId }, include: { reservations: { select: { orderId: true } } } }),
+      lotServesOrder(db, data.yarnLotId, data.orderId),
     ]);
     const refErrors: Record<string, string> = {};
     if (!workOrder || workOrder.orderId !== data.orderId) refErrors.workOrderId = "Work order not found for this order";
     else if (workOrder.stage !== "weaving") refErrors.workOrderId = "Rolls come off the weaving work order";
     if (!machine) refErrors.machineId = "Machine not found";
     else if (workOrder && machine.id !== workOrder.machineId) refErrors.machineId = "Use the loom this work order runs on";
-    if (!yarnLot) refErrors.yarnLotId = "Yarn lot not found";
-    else if (
-      yarnLot.linkedOrderId !== data.orderId &&
-      !yarnLot.reservations.some((r) => r.orderId === data.orderId) &&
-      // Orders seeded or started before reservations were enforced: the lot
-      // its earlier rolls came from still counts as its yarn.
-      !(await db.roll.count({ where: { orderId: data.orderId, yarnLotId: yarnLot.id } }))
-    ) {
-      refErrors.yarnLotId = "This yarn lot isn't reserved for this order";
-    }
+    if (lot === "missing") refErrors.yarnLotId = "Yarn lot not found";
+    else if (lot === "foreign") refErrors.yarnLotId = "This yarn lot isn't reserved for this order";
     if (Object.keys(refErrors).length) {
       return NextResponse.json({ fieldErrors: refErrors, error: "Validation failed" }, { status: 400 });
     }

@@ -41,6 +41,13 @@ export function istMidnight(date: Date): Date {
   return dayRange(istDateKey(date)).start;
 }
 
+/** When money dated `date` was received: today keeps the current time, so the
+ * audit trail and ordering stay meaningful; a back-dated entry is stored at
+ * noon IST. */
+export function receivedInstant(date: Date, now = new Date()): Date {
+  return istDateKey(date) === istDateKey(now) ? now : new Date(`${istDateKey(date)}T12:00:00+05:30`);
+}
+
 export function monthLabel(month: string): string {
   const [y, m] = month.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-IN", {

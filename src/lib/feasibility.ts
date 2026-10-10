@@ -26,6 +26,43 @@ export interface FeasibilityResult {
   capacityAvailableMetres: number;
 }
 
+const DEFAULT_WASTAGE_PCT = 8;
+
+/** What Order.feasibilityResult holds: the verdict plus the inputs needed to
+ * re-run it when the order is edited. */
+export interface StoredFeasibility extends FeasibilityResult {
+  yarnTypeId: string;
+  wastagePct: number;
+  checkedAt: string;
+}
+
+/** Runs the check for an order being saved and returns the JSON to store. */
+export async function storedFeasibility(order: {
+  gsm: number;
+  qtyMetres: number;
+  deadline: Date;
+  yarnTypeId: string;
+  wastagePct?: number;
+}): Promise<string> {
+  const wastagePct = order.wastagePct ?? DEFAULT_WASTAGE_PCT;
+  const result = await checkFeasibility({ ...order, wastagePct });
+  const stored: StoredFeasibility = { ...result, yarnTypeId: order.yarnTypeId, wastagePct, checkedAt: new Date().toISOString() };
+  return JSON.stringify(stored);
+}
+
+/** The yarn type and wastage a stored result was computed with, if it is one
+ * this app wrote (older rows may hold plain text). */
+export function storedFeasibilityInputs(raw: string | null): { yarnTypeId: string; wastagePct: number } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredFeasibility>;
+    if (typeof parsed.yarnTypeId !== "string") return null;
+    return { yarnTypeId: parsed.yarnTypeId, wastagePct: typeof parsed.wastagePct === "number" ? parsed.wastagePct : DEFAULT_WASTAGE_PCT };
+  } catch {
+    return null;
+  }
+}
+
 export async function checkFeasibility(input: FeasibilityInput): Promise<FeasibilityResult> {
   const { gsm, qtyMetres, deadline, wastagePct, yarnTypeId } = input;
 

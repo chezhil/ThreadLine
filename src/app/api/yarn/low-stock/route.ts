@@ -6,7 +6,8 @@ export async function GET() {
   const user = await requireRole("owner", "storekeeper");
   if (!user) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const yarnTypes = await db.yarnType.findMany({ include: { lots: true } });
+  // Archived yarn types are no longer stocked, so they're never "low".
+  const yarnTypes = await db.yarnType.findMany({ where: { archivedAt: null }, include: { lots: true } });
 
   const lowStock = yarnTypes
     .map((yt) => {

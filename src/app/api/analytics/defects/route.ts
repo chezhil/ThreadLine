@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { qualityActor } from "@/lib/quality/auth";
+import { notReversed } from "@/lib/reversals";
 
 
 export async function GET(req: NextRequest) {
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
         qcRecords: {
           some: {
             inspectedAt: { gte: startDate },
+            ...notReversed,
           },
         },
       },
@@ -33,6 +35,7 @@ export async function GET(req: NextRequest) {
         qcRecords: {
           where: {
             inspectedAt: { gte: startDate },
+            ...notReversed,
           },
           orderBy: { inspectedAt: "desc" },
         },

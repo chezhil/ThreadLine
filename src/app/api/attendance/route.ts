@@ -5,7 +5,8 @@ import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { attendanceBatchSchema, monthQuerySchema, SHIFTS, WAGE_FACTOR, type AttendanceStatus } from "@/lib/validation/accounts";
 import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from "@/lib/accounts/http";
-import { currentMonthKey, dayRange, istDateKey, istMidnight, monthRange } from "@/lib/accounts/period";
+import { currentMonthKey, dayRange, istDateKey, istMidnight, istMonthKey, monthLabel, monthRange } from "@/lib/accounts/period";
+import { attendanceLocked } from "@/lib/accounts/summary";
 
 // GET ?date=YYYY-MM-DD&shift=…  → the muster sheet for that date/shift
 // GET ?month=YYYY-MM            → per-worker attendance and wages for the month
@@ -70,8 +71,19 @@ export async function GET(req: NextRequest) {
   });
 }
 
+class MusterRefused extends Error {
+  constructor(
+    public fieldErrors: Record<string, string[]>,
+    public status: number,
+  ) {
+    super("muster refused");
+  }
+}
+
 // Saves a whole muster sheet. A worker already marked for this date and shift
-// is updated (and the change audited) rather than marked twice.
+// is updated (and the change audited) rather than marked twice. An archived
+// worker's existing mark can still be corrected, but they get no new marks;
+// a month whose wages were paid out is locked.
 export async function POST(req: NextRequest) {
   const user = await requireRole("owner");
   if (!user) return forbidden();
@@ -84,15 +96,14 @@ export async function POST(req: NextRequest) {
   const workerIds = entries.map((e) => e.workerId);
   const machineIds = [...new Set(entries.map((e) => e.machineId).filter((m): m is string => !!m))];
   const [workers, machines] = await Promise.all([
-    db.worker.findMany({ where: { id: { in: workerIds } }, select: { id: true, dailyWage: true } }),
+    db.worker.findMany({ where: { id: { in: workerIds } }, select: { id: true, name: true, dailyWage: true, archivedAt: true } }),
     db.machine.findMany({ where: { id: { in: machineIds } }, select: { id: true } }),
   ]);
-  const knownWorkers = new Set(workers.map((w) => w.id));
-  const wageOf = new Map(workers.map((w) => [w.id, w.dailyWage]));
+  const workerById = new Map(workers.map((w) => [w.id, w]));
   const knownMachines = new Set(machines.map((m) => m.id));
   const errors: Record<string, string[]> = {};
   entries.forEach((e, i) => {
-    if (!knownWorkers.has(e.workerId)) errors[`entries.${i}.workerId`] = ["Worker not found"];
+    if (!workerById.has(e.workerId)) errors[`entries.${i}.workerId`] = ["Worker not found"];
     if (e.machineId && !knownMachines.has(e.machineId)) errors[`entries.${i}.machineId`] = ["Machine not found"];
   });
   if (Object.keys(errors).length) return fieldErrorResponse(errors);
@@ -105,31 +116,46 @@ export async function POST(req: NextRequest) {
   const audits: Parameters<typeof logAudit>[] = [];
   let created = 0;
   let updated = 0;
-  await writeTransaction(async (tx) => {
-    const existing = await tx.attendance.findMany({
-      where: { workerId: { in: workerIds }, shift, date: { gte: start, lt: end } },
-    });
-    const byWorker = new Map(existing.map((a) => [a.workerId, a]));
-    for (const e of entries) {
-      const prev = byWorker.get(e.workerId);
-      if (prev) {
-        if (prev.status === e.status && (prev.machineId ?? null) === e.machineId) continue;
-        const next = await tx.attendance.update({
-          where: { id: prev.id },
-          data: { status: e.status, machineId: e.machineId },
-        });
-        audits.push(["Attendance", prev.id, "update", prev, next, user.id]);
-        updated++;
-      } else {
-        const next = await tx.attendance.create({
-          data: { workerId: e.workerId, date, shift, status: e.status, machineId: e.machineId, dailyWage: wageOf.get(e.workerId) },
-        });
-        byWorker.set(e.workerId, next);
-        audits.push(["Attendance", next.id, "create", null, next, user.id]);
-        created++;
+  try {
+    await writeTransaction(async (tx) => {
+      const month = istMonthKey(date);
+      if (await attendanceLocked(month, tx)) {
+        throw new MusterRefused({ date: [`Wages for ${monthLabel(month)} have been paid out, so its attendance is locked`] }, 409);
       }
-    }
-  });
+      const existing = await tx.attendance.findMany({
+        where: { workerId: { in: workerIds }, shift, date: { gte: start, lt: end } },
+      });
+      const byWorker = new Map(existing.map((a) => [a.workerId, a]));
+      const archived: Record<string, string[]> = {};
+      entries.forEach((e, i) => {
+        const worker = workerById.get(e.workerId)!;
+        if (worker.archivedAt && !byWorker.has(e.workerId)) archived[`entries.${i}.workerId`] = [`${worker.name} is archived; restore them to mark attendance`];
+      });
+      if (Object.keys(archived).length) throw new MusterRefused(archived, 400);
+      for (const e of entries) {
+        const prev = byWorker.get(e.workerId);
+        if (prev) {
+          if (prev.status === e.status && (prev.machineId ?? null) === e.machineId) continue;
+          const next = await tx.attendance.update({
+            where: { id: prev.id },
+            data: { status: e.status, machineId: e.machineId },
+          });
+          audits.push(["Attendance", prev.id, "update", prev, next, user.id]);
+          updated++;
+        } else {
+          const next = await tx.attendance.create({
+            data: { workerId: e.workerId, date, shift, status: e.status, machineId: e.machineId, dailyWage: workerById.get(e.workerId)!.dailyWage },
+          });
+          byWorker.set(e.workerId, next);
+          audits.push(["Attendance", next.id, "create", null, next, user.id]);
+          created++;
+        }
+      }
+    });
+  } catch (e) {
+    if (e instanceof MusterRefused) return fieldErrorResponse(e.fieldErrors, e.status);
+    throw e;
+  }
   for (const a of audits) await logAudit(...a);
 
   return NextResponse.json({ created, updated, unchanged: entries.length - created - updated }, { status: 201 });

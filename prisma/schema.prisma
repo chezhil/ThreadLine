@@ -31,12 +31,16 @@ model Session {
   @@index([expiresAt])
 }
 
+// archivedAt (Supplier, Buyer, YarnType, Worker): a record other rows still
+// point at can't be deleted, so it is archived instead — hidden from the
+// pickers that start new work, kept for history and restorable.
 model Supplier {
-  id       String    @id @default(uuid())
-  name     String
-  contact  String
-  gstin    String?
-  yarnLots YarnLot[]
+  id         String    @id @default(uuid())
+  name       String
+  contact    String
+  gstin      String?
+  archivedAt DateTime?
+  yarnLots   YarnLot[]
 }
 
 model Buyer {
@@ -45,18 +49,20 @@ model Buyer {
   contact    String
   gstin      String?
   address    String?
+  archivedAt DateTime?
   orders     Order[]
   dispatches Dispatch[]
 }
 
 model YarnType {
-  id                  String    @id @default(uuid())
+  id                  String            @id @default(uuid())
   name                String
   count               String
   material            String
   colour              String
   lowStockThresholdKg Float
   costPerKg           Float
+  archivedAt          DateTime?
   lots                YarnLot[]
   purchaseRequests    PurchaseRequest[]
 }
@@ -111,7 +117,7 @@ model OrderYarnReservation {
 }
 
 model Machine {
-  id                     String          @id @default(uuid())
+  id                     String               @id @default(uuid())
   name                   String
   type                   String // spinning|loom|dyeing
   status                 String // RUNNING|IDLE|BREAKDOWN|MAINTENANCE
@@ -172,14 +178,15 @@ model Roll {
 }
 
 model QCRecord {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   rollId      String
-  roll        Roll     @relation(fields: [rollId], references: [id])
+  roll        Roll      @relation(fields: [rollId], references: [id])
   inspectorId String
   result      String // PASS|REWORK|REJECT
   defects     String // JSON-encoded string array: hole|colour_mismatch|uneven_weave
   notes       String?
-  inspectedAt DateTime @default(now())
+  inspectedAt DateTime  @default(now())
+  reversal    Reversal?
 }
 
 model Dispatch {
@@ -206,15 +213,17 @@ model Invoice {
   // Defaulted so Module 1's invoice creation code needs no change.
   createdAt DateTime  @default(now())
   payments  Payment[]
+  reversal  Reversal?
 }
 
 model Payment {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   invoiceId  String
-  invoice    Invoice  @relation(fields: [invoiceId], references: [id])
+  invoice    Invoice   @relation(fields: [invoiceId], references: [id])
   amount     Float
-  receivedAt DateTime @default(now())
+  receivedAt DateTime  @default(now())
   mode       String
+  reversal   Reversal?
 }
 
 model Worker {
@@ -222,6 +231,7 @@ model Worker {
   name       String
   dailyWage  Float
   role       String
+  archivedAt DateTime?
   attendance Attendance[]
 }
 
@@ -242,13 +252,36 @@ model Attendance {
 }
 
 model Expense {
-  id       String   @id @default(uuid())
+  id       String    @id @default(uuid())
   category String // yarn|wages|power|overhead|other
   amount   Float
   date     DateTime
   orderId  String?
   // Additive (Module 4): bill no. / vendor / description for the expense.
   note     String?
+  reversal Reversal?
+}
+
+// Reverse-and-correct for the append-only records: a Payment, Expense,
+// Invoice or QC inspection is never edited or deleted. Reversing one inserts
+// this row (exactly one of the four ids is set; each is unique, so a record
+// is reversed at most once) and, for money, a reversing LedgerEntry in the
+// same transaction. Every reader skips reversed rows. A correction is a new
+// row of the same kind, linked here by replacementId.
+model Reversal {
+  id            String    @id @default(uuid())
+  paymentId     String?   @unique
+  payment       Payment?  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  expenseId     String?   @unique
+  expense       Expense?  @relation(fields: [expenseId], references: [id], onDelete: Restrict)
+  invoiceId     String?   @unique
+  invoice       Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  qcRecordId    String?   @unique
+  qcRecord      QCRecord? @relation(fields: [qcRecordId], references: [id], onDelete: Restrict)
+  reason        String
+  replacementId String?
+  reversedBy    String
+  createdAt     DateTime  @default(now())
 }
 
 model Notification {
@@ -313,16 +346,16 @@ model AlertDelivery {
 model LedgerEntry {
   id         String   @id @default(uuid())
   date       DateTime
-  type       String   // revenue | yarn_cost | wage_cost | power_cost | overhead | payment_received | reversal
+  type       String // revenue | yarn_cost | wage_cost | power_cost | overhead | payment_received | reversal
   // Positive for an original entry, negative for a row that reverses one —
   // so SUM(amount) nets out correctly without the reader needing to special-
   // case reversesId. (The addendum's own sketch said "always positive"; this
   // is the one deliberate deviation — noted in AI_NOTES.md.)
   amount     Float
-  sourceType String   // "Invoice" | "Payment" | "Expense"
+  sourceType String // "Invoice" | "Payment" | "Expense"
   sourceId   String
-  orderId    String?  // denormalized for a fast per-order ledger query
-  reversesId String?  // set only on a reversing entry; original rows are never edited or deleted
+  orderId    String? // denormalized for a fast per-order ledger query
+  reversesId String? // set only on a reversing entry; original rows are never edited or deleted
   note       String?
   createdAt  DateTime @default(now())
 
@@ -368,13 +401,13 @@ model MaintenanceRequest {
 
 model PayoutApproval {
   id          String    @id @default(uuid())
-  month       String    // YYYY-MM
+  month       String // YYYY-MM
   totalWages  Float
   requestedBy String
   status      String    @default("PENDING") // PENDING | APPROVED | REJECTED
   approvedBy  String?
   approvedAt  DateTime?
-  expenseId   String?   // set once approval creates the payout Expense
+  expenseId   String? // set once approval creates the payout Expense
   createdAt   DateTime  @default(now())
 
   @@unique([month])

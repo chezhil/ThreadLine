@@ -43,7 +43,7 @@ export async function productionInsights(db: PrismaClient, now = new Date()) {
       where: { productionStatus: "IN_PRODUCTION", status: { not: "CLOSED" } },
       include: { workOrders: { include: { machine: true } } },
     }),
-    db.yarnType.findMany({ include: { lots: true } }),
+    db.yarnType.findMany({ where: { archivedAt: null }, include: { lots: true } }),
     db.productionLog.findMany({
       where: { loggedAt: { gte: new Date(now.getTime() - 7 * DAY_MS) }, workOrder: { stage: "weaving" } },
       include: { workOrder: { include: { order: { include: { reservations: { include: { yarnLot: true } } } } } } },

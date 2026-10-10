@@ -15,9 +15,22 @@ export const RealtimeEvents = {
   RollCreated: "roll:created",
   QcCompleted: "qc:completed",
   DispatchCompleted: "dispatch:completed",
+  // A record was edited, archived, deleted or reversed (payload: DataChange).
+  DataChanged: "data:changed",
 } as const;
 
 export type RealtimeEvent = (typeof RealtimeEvents)[keyof typeof RealtimeEvents];
+
+/** Ids only — what changed, never the data itself. */
+export interface DataChange {
+  entity: string;
+  id: string;
+  action: "update" | "delete" | "archive" | "restore" | "reverse";
+}
+
+export function emitDataChanged(change: DataChange) {
+  emit(RealtimeEvents.DataChanged, change);
+}
 
 export function emit(event: RealtimeEvent, payload: unknown) {
   const io = globalThis.__threadlineIO;

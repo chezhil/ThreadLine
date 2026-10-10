@@ -9,7 +9,7 @@ import { backfillLedgerEntries } from "../src/lib/ledger";
 
 async function main() {
   const result = await backfillLedgerEntries(db);
-  console.log(`Backfilled: ${result.invoices} invoice(s), ${result.payments} payment(s), ${result.expenses} expense(s) ledger entries.`);
+  console.log(`Backfilled: ${result.invoices} invoice(s), ${result.payments} payment(s), ${result.expenses} expense(s), ${result.reversals} reversal(s) ledger entries.`);
   await db.$disconnect();
 }
 

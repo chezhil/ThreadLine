@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "../db";
+import { notReversed } from "../reversals";
 import { EXPENSE_CATEGORIES, WAGE_FACTOR, type AttendanceStatus } from "../validation/accounts";
 import { computeCosting, ordersInProgressIn, ordersRealisedIn, type CostingResult } from "./costing";
 import { monthLabel, monthRange } from "./period";
@@ -24,10 +25,17 @@ export async function accruedWages(month: string, client: PrismaClient | Prisma.
   return r2(marks.reduce((s, a) => s + wageFor(a), 0));
 }
 
+/** A month whose wage payout was approved is closed for attendance: the
+ * payout released exactly what its marks added up to, so changing a mark
+ * afterwards would make wages and the paid-out bill disagree. */
+export async function attendanceLocked(month: string, client: PrismaClient | Prisma.TransactionClient = defaultDb) {
+  return (await client.payoutApproval.count({ where: { month, status: "APPROVED" } })) > 0;
+}
+
 export interface MonthSummary {
   month: string;
   label: string;
-  /** Accrual view: profit booked on orders first invoiced this month. */
+  /** Accrual view: profit booked on orders that finished this month. */
   pnl: {
     ordersRealised: number;
     revenue: number;
@@ -69,14 +77,14 @@ export async function monthSummary(
   const inMonth = { gte: start, lt: end };
   const [c, payments, expenses, attendance, monthInvoices, allInvoices] = await Promise.all([
     costing ?? computeCosting(db),
-    db.payment.findMany({ where: { receivedAt: inMonth }, select: { amount: true } }),
-    db.expense.findMany({ where: { date: inMonth }, select: { category: true, amount: true } }),
+    db.payment.findMany({ where: { receivedAt: inMonth, ...notReversed }, select: { amount: true } }),
+    db.expense.findMany({ where: { date: inMonth, ...notReversed }, select: { category: true, amount: true } }),
     db.attendance.findMany({
       where: { date: inMonth },
       select: { workerId: true, status: true, dailyWage: true, worker: { select: { dailyWage: true } } },
     }),
-    db.invoice.findMany({ where: { createdAt: inMonth }, select: { gst: true, total: true } }),
-    db.invoice.findMany({ select: { total: true, payments: { select: { amount: true } } } }),
+    db.invoice.findMany({ where: { createdAt: inMonth, ...notReversed }, select: { gst: true, total: true } }),
+    db.invoice.findMany({ where: notReversed, select: { total: true, payments: { where: notReversed, select: { amount: true } } } }),
   ]);
 
   const realised = ordersRealisedIn(c.orders, month);

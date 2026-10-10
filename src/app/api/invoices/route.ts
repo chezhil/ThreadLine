@@ -7,6 +7,7 @@ import { computeInvoiceTotals } from "@/lib/billing";
 import { logAudit } from "@/lib/audit";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { postLedgerEntry } from "@/lib/ledger";
+import { notReversed } from "@/lib/reversals";
 
 const createInvoiceSchema = z.object({
   orderId: z.string().min(1),
@@ -14,9 +15,10 @@ const createInvoiceSchema = z.object({
 
 // Additive route — only GET /api/invoices/:id is in the fixed contract, but
 // something has to create the invoice. Called from the order detail page's
-// "Generate GST invoice" button. One order gets at most one invoice — calling
-// this twice (including two concurrent calls) returns the existing one
-// rather than creating a duplicate.
+// "Generate GST invoice" button. One order has at most one active invoice —
+// calling this twice (including two concurrent calls) returns the existing
+// one rather than creating a duplicate. A reversed (credit-noted) invoice
+// doesn't count, so the order can be invoiced again.
 export async function POST(req: NextRequest) {
   const user = await requireRole("owner", "storekeeper");
   if (!user) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
   // fresh find-or-create, not a stale one) if it still collides.
   const { invoice, created } = await withRetry(() =>
     writeTransaction(async (tx) => {
-      const existing = await tx.invoice.findFirst({ where: { orderId: order.id } });
+      const existing = await tx.invoice.findFirst({ where: { orderId: order.id, ...notReversed } });
       if (existing) return { invoice: existing, created: false };
 
       const subtotal = order.qtyMetres * order.pricePerMetre;

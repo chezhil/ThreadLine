@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "../db";
+import { notReversed } from "../reversals";
 import { dayRange, istDateKey } from "./period";
 
 // Machine output and roll quality, read from Module 2's ProductionLog/Machine
@@ -102,16 +103,17 @@ export interface MachineQualityRow {
 
 /**
  * Roll QC outcomes per machine over the last `days` days (by the roll's latest
- * QC record). Rolls never inspected are left out rather than counted as passes.
+ * QC record that wasn't reversed). Rolls never inspected are left out rather
+ * than counted as passes.
  */
 export async function machineQuality(days = 30, db: PrismaClient = defaultDb, now = new Date()) {
   const since = new Date(now.getTime() - days * DAY_MS);
   const rolls = await db.roll.findMany({
-    where: { qcRecords: { some: { inspectedAt: { gte: since } } } },
+    where: { qcRecords: { some: { inspectedAt: { gte: since }, ...notReversed } } },
     select: {
       machineId: true,
       machine: { select: { name: true } },
-      qcRecords: { orderBy: { inspectedAt: "desc" }, take: 1, select: { result: true } },
+      qcRecords: { where: notReversed, orderBy: { inspectedAt: "desc" }, take: 1, select: { result: true } },
     },
   });
   const map = new Map<string, MachineQualityRow>();

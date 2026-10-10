@@ -7,36 +7,42 @@ import { logAudit } from "@/lib/audit";
 import { monthQuerySchema, paymentSchema } from "@/lib/validation/accounts";
 import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from "@/lib/accounts/http";
 import { notify } from "@/lib/accounts/alerts";
-import { currentMonthKey, istDateKey, monthRange } from "@/lib/accounts/period";
+import { currentMonthKey, istDateKey, monthRange, receivedInstant } from "@/lib/accounts/period";
+import { inr } from "@/lib/accounts/format";
 import { recomputePaymentStatus } from "@/lib/order-status";
 import { emit, RealtimeEvents } from "@/lib/realtime";
 import { postLedgerEntry } from "@/lib/ledger";
+import { notReversed, reversalSummary } from "@/lib/reversals";
 
-const formatINR = (n: number) =>
-  n.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
+const money = (n: number) => inr(n, { decimals: true });
 
+/** Every invoice with its paid/outstanding balance. A reversed (cancelled)
+ * invoice is listed for the record with nothing outstanding; reversed
+ * payments never count towards "paid". */
 async function invoicesWithBalance() {
   const invoices = await db.invoice.findMany({
     include: {
       order: { select: { orderNo: true, buyer: { select: { name: true } } } },
-      payments: { select: { amount: true } },
+      payments: { where: notReversed, select: { amount: true } },
+      reversal: reversalSummary,
     },
     orderBy: { invoiceNo: "asc" },
   });
-  return invoices.map(({ payments, order, ...inv }) => {
+  return invoices.map(({ payments, order, reversal, ...inv }) => {
     const paid = round2(payments.reduce((s, p) => s + p.amount, 0));
     return {
       ...inv,
       orderNo: order.orderNo,
       buyerName: order.buyer.name,
       paid,
-      outstanding: round2(inv.total - paid),
+      outstanding: reversal ? 0 : round2(inv.total - paid),
+      reversal: reversal ? { reason: reversal.reason, createdAt: reversal.createdAt, replacementId: reversal.replacementId } : null,
     };
   });
 }
 
-// GET ?month=YYYY-MM → payments received that month, plus every invoice with
-// its paid/outstanding balance (Invoice rows are Module 1's; read-only here).
+// GET ?month=YYYY-MM → payments received that month (reversed ones flagged,
+// left out of the total), plus every invoice with its balance.
 export async function GET(req: NextRequest) {
   const user = await requireRole("owner");
   if (!user) return forbidden();
@@ -51,11 +57,13 @@ export async function GET(req: NextRequest) {
       where: { receivedAt: { gte: start, lt: end } },
       include: {
         invoice: { select: { invoiceNo: true, order: { select: { orderNo: true, buyer: { select: { name: true } } } } } },
+        reversal: reversalSummary,
       },
       orderBy: { receivedAt: "desc" },
     }),
     invoicesWithBalance(),
   ]);
+  const counted = payments.filter((p) => !p.reversal);
 
   return NextResponse.json({
     month,
@@ -68,10 +76,12 @@ export async function GET(req: NextRequest) {
       amount: p.amount,
       mode: p.mode,
       receivedAt: p.receivedAt,
+      reversal: p.reversal ? { reason: p.reversal.reason, createdAt: p.reversal.createdAt, replacementId: p.reversal.replacementId } : null,
     })),
     invoices,
     totals: {
-      receivedThisMonth: round2(payments.reduce((s, p) => s + p.amount, 0)),
+      receivedThisMonth: round2(counted.reduce((s, p) => s + p.amount, 0)),
+      paymentsCount: counted.length,
       outstanding: round2(invoices.reduce((s, i) => s + Math.max(0, i.outstanding), 0)),
     },
   });
@@ -80,6 +90,8 @@ export async function GET(req: NextRequest) {
 type PaymentWithInvoice = Prisma.PaymentGetPayload<{
   include: { invoice: { include: { payments: { select: { amount: true } } } } };
 }>;
+
+const withActivePayments = { invoice: { include: { payments: { where: notReversed, select: { amount: true } } } } } as const;
 
 /** The answer to a repeated clientMutationId: the payment already recorded,
  * or 409 when that id was used for a different invoice. */
@@ -104,18 +116,20 @@ export async function POST(req: NextRequest) {
   // the same clientMutationId returns the payment already recorded instead
   // of recording the same money twice.
   if (clientMutationId) {
-    const existing = await db.payment.findUnique({
-      where: { id: clientMutationId },
-      include: { invoice: { include: { payments: { select: { amount: true } } } } },
-    });
+    const existing = await db.payment.findUnique({ where: { id: clientMutationId }, include: withActivePayments });
     if (existing) return replayedPayment(existing, invoiceId);
   }
 
   const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
-    include: { payments: { select: { amount: true } }, order: { select: { orderNo: true, buyer: { select: { name: true } } } } },
+    include: {
+      payments: { where: notReversed, select: { amount: true } },
+      order: { select: { orderNo: true, buyer: { select: { name: true } } } },
+      reversal: { select: { id: true } },
+    },
   });
   if (!invoice) return fieldErrorResponse({ invoiceId: ["Invoice not found"] });
+  if (invoice.reversal) return fieldErrorResponse({ invoiceId: [`${invoice.invoiceNo} was cancelled; record payments against its replacement`] });
 
   const paid = invoice.payments.reduce((s, p) => s + p.amount, 0);
   const outstanding = round2(invoice.total - paid);
@@ -123,27 +137,25 @@ export async function POST(req: NextRequest) {
     return fieldErrorResponse({ invoiceId: [`${invoice.invoiceNo} is already fully paid`] });
   }
   if (amount > outstanding + 0.005) {
-    return fieldErrorResponse({ amount: [`Only ${formatINR(outstanding)} is outstanding on ${invoice.invoiceNo}`] });
+    return fieldErrorResponse({ amount: [`Only ${money(outstanding)} is outstanding on ${invoice.invoiceNo}`] });
   }
   if (istDateKey(receivedAt) < istDateKey(invoice.createdAt)) {
     return fieldErrorResponse({ receivedAt: ["Payment can't be received before the invoice date"] });
   }
 
-  // A date-only entry for today keeps the current time so the audit trail and
-  // ordering stay meaningful; a back-dated entry is stored at noon IST.
-  const at = istDateKey(receivedAt) === istDateKey(new Date())
-    ? new Date()
-    : new Date(`${istDateKey(receivedAt)}T12:00:00+05:30`);
+  const at = receivedInstant(receivedAt);
 
   // Insert, then re-check the balance inside the same transaction so two
-  // payments saved at once can't together overpay the invoice.
+  // payments saved at once can't together overpay the invoice (and an
+  // invoice reversed in between refuses the payment).
   let saved;
   try {
     saved = await writeTransaction(async (tx) => {
+      if (await tx.reversal.findUnique({ where: { invoiceId }, select: { id: true } })) throw new Error("INVOICE_REVERSED");
       const created = await tx.payment.create({
         data: { id: clientMutationId || undefined, invoiceId, amount, mode, receivedAt: at },
       });
-      const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
+      const sum = await tx.payment.aggregate({ where: { invoiceId, ...notReversed }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");
       // Ledger entry before recomputePaymentStatus — that function sums
       // ledger rows, so it must see this payment's entry already posted.
@@ -162,14 +174,14 @@ export async function POST(req: NextRequest) {
     // The same clientMutationId sent twice at once: the second insert loses
     // the primary-key race. Answer with the payment the first one recorded.
     if (clientMutationId && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      const existing = await db.payment.findUnique({
-        where: { id: clientMutationId },
-        include: { invoice: { include: { payments: { select: { amount: true } } } } },
-      });
+      const existing = await db.payment.findUnique({ where: { id: clientMutationId }, include: withActivePayments });
       if (existing) return replayedPayment(existing, invoiceId);
     }
     if (e instanceof Error && e.message === "OVERPAID") {
       return fieldErrorResponse({ amount: ["Another payment was just recorded on this invoice; refresh and check the balance"] }, 409);
+    }
+    if (e instanceof Error && e.message === "INVOICE_REVERSED") {
+      return fieldErrorResponse({ invoiceId: [`${invoice.invoiceNo} was just cancelled; refresh to see its replacement`] }, 409);
     }
     throw e;
   }
@@ -190,8 +202,8 @@ export async function POST(req: NextRequest) {
   const remaining = round2(outstanding - amount);
   await notify(
     "payment_received",
-    `${formatINR(amount)} received from ${invoice.order.buyer.name} against ${invoice.invoiceNo} (${invoice.order.orderNo}) by ${mode.toUpperCase()}. ${
-      remaining > 0 ? `${formatINR(remaining)} still outstanding.` : "Invoice fully paid."
+    `${money(amount)} received from ${invoice.order.buyer.name} against ${invoice.invoiceNo} (${invoice.order.orderNo}) by ${mode.toUpperCase()}. ${
+      remaining > 0 ? `${money(remaining)} still outstanding.` : "Invoice fully paid."
     }`,
     "info",
   );

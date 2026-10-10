@@ -5,7 +5,7 @@ import { fieldErrorResponse, forbidden, notFound, zodFieldErrors } from "@/lib/a
 import { monthQuerySchema } from "@/lib/validation/accounts";
 
 // GET                      → every order's cost, revenue and profit
-// GET ?month=YYYY-MM       → orders booked that month (first invoiced) + work in progress active that month
+// GET ?month=YYYY-MM       → orders booked that month (finished shipping) + work in progress active that month
 // GET ?orderId=…           → one order, with cost per roll
 export async function GET(req: NextRequest) {
   const user = await requireRole("owner");

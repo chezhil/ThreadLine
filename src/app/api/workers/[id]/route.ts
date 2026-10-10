@@ -4,6 +4,8 @@ import { requireRole } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { workerUpdateSchema } from "@/lib/validation/accounts";
 import { fieldErrorResponse, forbidden, notFound, readJson, zodFieldErrors } from "@/lib/accounts/http";
+import { archivedAtFor } from "@/lib/validation/common";
+import { emitDataChanged } from "@/lib/realtime";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -17,14 +19,22 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 
   const parsed = workerUpdateSchema.safeParse(await readJson(req));
   if (!parsed.success) return fieldErrorResponse(zodFieldErrors(parsed.error));
+  const { archived, ...fields } = parsed.data;
 
-  if (parsed.data.name && parsed.data.name !== before.name) {
-    const clash = await db.worker.findFirst({ where: { name: parsed.data.name, NOT: { id } } });
+  if (fields.name && fields.name !== before.name) {
+    const clash = await db.worker.findFirst({ where: { name: fields.name, NOT: { id } } });
     if (clash) return fieldErrorResponse({ name: ["A worker with this name already exists"] }, 409);
   }
 
-  const worker = await db.worker.update({ where: { id }, data: parsed.data });
-  await logAudit("Worker", id, "update", before, worker, user.id);
+  // An archived worker (left the mill) drops off the muster sheet but keeps
+  // their attendance history.
+  const worker = await db.worker.update({
+    where: { id },
+    data: { ...fields, archivedAt: archivedAtFor(archived, before.archivedAt) },
+  });
+  const action = archived === undefined ? "update" : archived ? "archive" : "restore";
+  await logAudit("Worker", id, action, before, worker, user.id);
+  emitDataChanged({ entity: "Worker", id, action });
   return NextResponse.json({ worker });
 }
 
@@ -44,7 +54,7 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
     return fieldErrorResponse(
       {
         _form: [
-          `${worker.name} has ${worker._count.attendance} attendance mark(s) that past wages and order costs depend on, so they can't be deleted.`,
+          `${worker.name} has ${worker._count.attendance} attendance mark(s) that past wages and order costs depend on, so they can't be deleted. Archive them instead to take them off the muster sheet.`,
         ],
       },
       409,

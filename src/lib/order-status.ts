@@ -19,6 +19,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { db } from "./db";
 import { logAudit } from "./audit";
 import { emit, RealtimeEvents } from "./realtime";
+import { notReversed } from "./reversals";
 import { ORDER_STATUSES, type OrderStatus } from "./tokens";
 
 export { ORDER_STATUSES, type OrderStatus };
@@ -59,7 +60,9 @@ export function deriveStatus(current: string, g: GranularStatus): OrderStatus {
   if (g.productionStatus === "DONE" && g.qcStatus === "PASS") return "READY";
   if (g.productionStatus === "DONE") return "QC";
   if (g.productionStatus === "IN_PRODUCTION") return "IN_PRODUCTION";
-  return current === "CONFIRMED" ? "CONFIRMED" : "NEW";
+  // Nothing produced. Production only ever starts on a confirmed order, so an
+  // order whose last work order was removed goes back to CONFIRMED, not NEW.
+  return current === "NEW" ? "NEW" : "CONFIRMED";
 }
 
 export interface StatusChange {
@@ -119,14 +122,29 @@ export async function applyProductionCompleted(tx: Db, orderId: string) {
 /** The last stage of the spinning → weaving → dyeing route. */
 export const FINAL_STAGE = "dyeing";
 
-/** Derives productionStatus from this order's WorkOrder rows. The live app
- * never calls this — it uses the real events (applyProductionStarted/
- * applyProductionCompleted) at the moment they happen. This exists for data
- * that was written directly (seed scripts), which has no such moment to hook.
- * DONE needs every work order completed AND either the final stage among
- * them or rolls already made from it (seeded history that never had a
- * dyeing work order but clearly finished cloth); one completed spinning work
- * order on its own is not a finished order. */
+async function applyProductionStatus(tx: Db, orderId: string, productionStatus: ProductionStatus) {
+  const dispatchStatus = await dispatchStatusFromRolls(tx, orderId, productionStatus);
+  return applyDerived(tx, orderId, { productionStatus, dispatchStatus });
+}
+
+/** Re-derives productionStatus from this order's WorkOrder rows after one was
+ * removed or its output corrected: NOT_STARTED with none, DONE only once the
+ * final stage exists and every work order is COMPLETED, IN_PRODUCTION
+ * otherwise. Call inside the transaction that made the change. */
+export async function syncProductionStatus(tx: Db, orderId: string) {
+  const workOrders = await tx.workOrder.findMany({ where: { orderId }, select: { stage: true, status: true } });
+  let productionStatus: ProductionStatus;
+  if (workOrders.length === 0) productionStatus = "NOT_STARTED";
+  else if (workOrders.some((w) => w.stage === FINAL_STAGE) && workOrders.every((w) => w.status === "COMPLETED")) productionStatus = "DONE";
+  else productionStatus = "IN_PRODUCTION";
+  return applyProductionStatus(tx, orderId, productionStatus);
+}
+
+/** Derives productionStatus for data that was written directly (seed
+ * scripts), which has no live event to hook. Unlike syncProductionStatus it
+ * also accepts seeded history that never had a dyeing work order but clearly
+ * finished cloth: every work order completed and rolls already made. One
+ * completed spinning work order on its own is still not a finished order. */
 export async function recomputeProductionStatus(tx: Db, orderId: string) {
   const workOrders = await tx.workOrder.findMany({ where: { orderId }, select: { stage: true, status: true } });
   let productionStatus: ProductionStatus;
@@ -139,8 +157,7 @@ export async function recomputeProductionStatus(tx: Db, orderId: string) {
   } else {
     productionStatus = "IN_PRODUCTION";
   }
-  const dispatchStatus = await dispatchStatusFromRolls(tx, orderId, productionStatus);
-  return applyDerived(tx, orderId, { productionStatus, dispatchStatus });
+  return applyProductionStatus(tx, orderId, productionStatus);
 }
 
 /** Recomputes order-level QC status from this order's Roll.qcStatus rows.
@@ -194,7 +211,8 @@ export async function recomputeRollAggregates(tx: Db, orderId: string): Promise<
  * ledger classifies) vs. the ledger's `payment_received` entries for this
  * order (HARDENING_ADDENDUM.md item 3: one source of truth for how much has
  * actually been paid). A reversed payment keeps the same type with a negated
- * amount, so the sum nets out without special-casing reversesId.
+ * amount, so the sum nets out without special-casing reversesId; a reversed
+ * (credit-noted) invoice no longer counts as billed.
  * Independent of `status` — an order can be fully DISPATCHED and still
  * UNPAID. Returns the change so the caller can audit/broadcast it. */
 export async function recomputePaymentStatus(
@@ -202,7 +220,7 @@ export async function recomputePaymentStatus(
   orderId: string,
 ): Promise<{ from: PaymentStatus; to: PaymentStatus }> {
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { paymentStatus: true } });
-  const invoices = await tx.invoice.findMany({ where: { orderId }, select: { total: true } });
+  const invoices = await tx.invoice.findMany({ where: { orderId, ...notReversed }, select: { total: true } });
   const totalInvoiced = invoices.reduce((s, i) => s + i.total, 0);
   const paidAgg = await tx.ledgerEntry.aggregate({
     where: { orderId, type: "payment_received" },

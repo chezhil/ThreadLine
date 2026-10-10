@@ -17,7 +17,11 @@ export async function GET() {
   if ("response" in actor) return actor.response;
   const [workOrders, orders, machines] = await Promise.all([
     db.workOrder.findMany({
-      include: { order: { select: { orderNo: true } }, machine: { select: { name: true, status: true } } },
+      include: {
+        order: { select: { orderNo: true, status: true } },
+        machine: { select: { id: true, name: true, status: true } },
+        _count: { select: { productionLogs: true, rolls: true } },
+      },
       orderBy: { startedAt: "desc" },
     }),
     db.order.findMany({

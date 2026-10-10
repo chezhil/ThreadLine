@@ -11,12 +11,16 @@ import { db } from "./db";
 // anything else that can't race itself.
 type Db = PrismaClient | Prisma.TransactionClient;
 
+// The sequence runs across months (EVR-2610-009 is followed by EVR-2611-010).
+// It continues from the highest number in use, not the row count: orders can
+// be deleted, and a count would then hand out a number that already exists.
 export async function generateOrderNo(tx: Db = db): Promise<string> {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(2);
   const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const count = await tx.order.count();
-  const seq = String(count + 1).padStart(3, "0");
+  const orders = await tx.order.findMany({ select: { orderNo: true } });
+  const highest = orders.reduce((max, o) => Math.max(max, Number(/-(\d+)$/.exec(o.orderNo)?.[1] ?? 0)), 0);
+  const seq = String(highest + 1).padStart(3, "0");
   return `EVR-${yy}${mm}-${seq}`;
 }
 

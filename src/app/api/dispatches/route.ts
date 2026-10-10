@@ -12,6 +12,7 @@ import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { recomputeDispatchStatus, recordStatusChanges } from "@/lib/order-status";
 import { enqueueAlert } from "@/lib/alerts/outbox";
 import { postLedgerEntry } from "@/lib/ledger";
+import { notReversed } from "@/lib/reversals";
 
 // 15% over-production allowance — rolls rarely sum to exactly qtyMetres, and
 // this mirrors industry standard textile mill tolerances and seeded demo rolls.
@@ -181,7 +182,7 @@ export async function POST(req: NextRequest) {
         const createdInvoices = [];
         let invoiceId: string | null = null;
         for (const order of distinctOrders) {
-          let invoice = await tx.invoice.findFirst({ where: { orderId: order.id } });
+          let invoice = await tx.invoice.findFirst({ where: { orderId: order.id, ...notReversed } });
           if (!invoice) {
             const subtotal = order.qtyMetres * order.pricePerMetre;
             const { gst, total } = computeInvoiceTotals(subtotal);

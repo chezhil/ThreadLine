@@ -26,11 +26,21 @@ export const workOrderSchema = z.object({
   plannedQty: z.coerce.number().finite().positive("Planned metres must be greater than zero"),
 });
 
+export const workOrderUpdateSchema = workOrderSchema
+  .pick({ machineId: true, plannedQty: true })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, { message: "Provide a field to update" });
+
 export const productionLogSchema = z.object({
   workOrderId: z.string().uuid("Select a work order"),
   shift: z.string().trim().min(1, "Enter a shift").max(40),
   qtyProduced: z.coerce.number().finite().positive("Produced metres must be greater than zero"),
 });
+
+export const productionLogUpdateSchema = productionLogSchema
+  .pick({ shift: true, qtyProduced: true })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, { message: "Provide a field to update" });
 
 export type MachineInput = z.infer<typeof machineSchema>;
 export type WorkOrderInput = z.infer<typeof workOrderSchema>;

@@ -1,13 +1,28 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { writeTransaction } from "@/lib/concurrency";
 import { logAudit } from "@/lib/audit";
 import { emit } from "@/lib/realtime";
-import { productionLogSchema } from "@/lib/validation/production";
+import { productionIdSchema, productionLogSchema } from "@/lib/validation/production";
 import { productionActor } from "@/lib/production/auth";
 import { fieldError, jsonBody, problem } from "@/lib/production/http";
 import { millDayRange, refreshProductionAlerts } from "@/lib/production/insights";
 import { applyProductionCompleted, FINAL_STAGE, recordStatusChanges, type StatusChange } from "@/lib/order-status";
+
+// GET ?workOrderId=… — that work order's output entries, newest first, with
+// who logged each (by name), so a wrong entry can be found and corrected.
+export async function GET(request: NextRequest) {
+  const actor = await productionActor();
+  if ("response" in actor) return actor.response;
+  const workOrderId = request.nextUrl.searchParams.get("workOrderId");
+  if (!productionIdSchema.safeParse(workOrderId).success) return problem("Pass a valid workOrderId", 400, "workOrderId");
+  const logs = await db.productionLog.findMany({ where: { workOrderId: workOrderId! }, orderBy: { loggedAt: "desc" } });
+  const users = await db.user.findMany({ where: { id: { in: [...new Set(logs.map((log) => log.loggedBy))] } }, select: { id: true, name: true } });
+  const names = new Map(users.map((user) => [user.id, user.name]));
+  return NextResponse.json({
+    logs: logs.map(({ loggedBy, ...log }) => ({ ...log, loggedByName: names.get(loggedBy) ?? "Unknown user" })),
+  });
+}
 
 export async function POST(request: Request) {
   const actor = await productionActor();

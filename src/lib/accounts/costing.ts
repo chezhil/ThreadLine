@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { db as defaultDb } from "../db";
+import { notReversed } from "../reversals";
 import { WAGE_FACTOR, type AttendanceStatus } from "../validation/accounts";
 import { istDateKey, istMonthKey, monthLabel } from "./period";
 
@@ -128,14 +129,15 @@ export async function computeCosting(db: PrismaClient = defaultDb): Promise<Cost
     db.attendance.findMany({
       select: { date: true, status: true, machineId: true, dailyWage: true, worker: { select: { dailyWage: true } } },
     }),
-    db.expense.findMany({ select: { category: true, amount: true, date: true, orderId: true } }),
+    db.expense.findMany({ where: notReversed, select: { category: true, amount: true, date: true, orderId: true } }),
     db.invoice.findMany({
+      where: notReversed,
       select: {
         orderId: true,
         subtotal: true,
         total: true,
         createdAt: true,
-        payments: { select: { amount: true } },
+        payments: { where: notReversed, select: { amount: true } },
       },
     }),
   ]);

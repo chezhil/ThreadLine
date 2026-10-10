@@ -131,5 +131,26 @@ export async function backfillLedgerEntries(client: PrismaClient = db) {
     expenses++;
   }
 
-  return { invoices, payments, expenses };
+  // A reversed money row needs its reversing entry too (a Reversal written
+  // without one, e.g. by a script, would leave the ledger counting it).
+  let reversals = 0;
+  const reversed = await client.reversal.findMany({
+    where: { qcRecordId: null },
+    select: { paymentId: true, expenseId: true, invoiceId: true, reason: true },
+  });
+  for (const r of reversed) {
+    const [sourceType, sourceId] = r.paymentId
+      ? ["Payment", r.paymentId]
+      : r.expenseId
+        ? ["Expense", r.expenseId]
+        : ["Invoice", r.invoiceId];
+    if (!sourceId) continue;
+    const entries = await client.ledgerEntry.findMany({ where: { sourceType, sourceId } });
+    const original = entries.find((e) => e.reversesId === null);
+    if (!original || entries.some((e) => e.reversesId === original.id)) continue;
+    await reverseLedgerEntry(client, original.id, `Reversed: ${r.reason}`);
+    reversals++;
+  }
+
+  return { invoices, payments, expenses, reversals };
 }

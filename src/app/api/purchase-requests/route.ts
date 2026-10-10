@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
 
   const yarnType = await db.yarnType.findUnique({ where: { id: parsed.data.yarnTypeId } });
   if (!yarnType) return fieldErrorResponse({ yarnTypeId: ["Yarn type not found"] });
+  if (yarnType.archivedAt) return fieldErrorResponse({ yarnTypeId: ["This yarn type is archived; restore it before buying more"] });
 
   // One open request per yarn type: a second click (or a second storekeeper)
   // would otherwise queue the same purchase twice. Checked and created under

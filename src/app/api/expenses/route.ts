@@ -7,8 +7,10 @@ import { fieldErrorResponse, forbidden, readJson, round2, zodFieldErrors } from 
 import { currentMonthKey, istMidnight, monthRange } from "@/lib/accounts/period";
 import { expenseCategoryToLedgerType, postLedgerEntry } from "@/lib/ledger";
 import { writeTransaction } from "@/lib/concurrency";
+import { reversalSummary } from "@/lib/reversals";
 
-// GET ?month=YYYY-MM[&category=power][&orderId=…]
+// GET ?month=YYYY-MM[&category=power][&orderId=…] — reversed bills are listed
+// (flagged, with the reason) but left out of every total.
 export async function GET(req: NextRequest) {
   const user = await requireRole("owner");
   if (!user) return forbidden();
@@ -29,20 +31,31 @@ export async function GET(req: NextRequest) {
       ...(category ? { category } : {}),
       ...(sp.get("orderId") ? { orderId: sp.get("orderId") } : {}),
     },
+    include: { reversal: reversalSummary },
     orderBy: [{ date: "desc" }, { id: "asc" }],
   });
+  const payoutIds = new Set(
+    (await db.payoutApproval.findMany({ where: { expenseId: { in: expenses.map((e) => e.id) } }, select: { expenseId: true } })).map((p) => p.expenseId),
+  );
+  const counted = expenses.filter((e) => !e.reversal);
   const orderIds = [...new Set(expenses.map((e) => e.orderId).filter((id): id is string => !!id))];
   const orders = await db.order.findMany({ where: { id: { in: orderIds } }, select: { id: true, orderNo: true } });
   const orderNo = new Map(orders.map((o) => [o.id, o.orderNo]));
 
   const byCategory: Record<string, number> = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c, 0]));
-  for (const e of expenses) byCategory[e.category] += e.amount;
+  for (const e of counted) byCategory[e.category] += e.amount;
 
   return NextResponse.json({
     month,
-    expenses: expenses.map((e) => ({ ...e, orderNo: e.orderId ? orderNo.get(e.orderId) ?? null : null })),
+    expenses: expenses.map(({ reversal, ...e }) => ({
+      ...e,
+      orderNo: e.orderId ? orderNo.get(e.orderId) ?? null : null,
+      // The bill an approved wage payout created stands with its approval.
+      isPayout: payoutIds.has(e.id),
+      reversal: reversal ? { reason: reversal.reason, createdAt: reversal.createdAt, replacementId: reversal.replacementId } : null,
+    })),
     totals: {
-      total: round2(expenses.reduce((s, e) => s + e.amount, 0)),
+      total: round2(counted.reduce((s, e) => s + e.amount, 0)),
       byCategory: Object.fromEntries(Object.entries(byCategory).map(([k, v]) => [k, round2(v)])),
     },
   });

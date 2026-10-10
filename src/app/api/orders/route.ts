@@ -6,7 +6,7 @@ import { generateOrderNo, generateTrackingToken } from "@/lib/order-numbers";
 import { logAudit } from "@/lib/audit";
 import { emit, RealtimeEvents } from "@/lib/realtime";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
-import { checkFeasibility } from "@/lib/feasibility";
+import { storedFeasibility } from "@/lib/feasibility";
 
 export async function GET() {
   const user = await requireRole("owner");
@@ -36,6 +36,9 @@ export async function POST(req: NextRequest) {
   if (!buyer) {
     return NextResponse.json({ fieldErrors: { buyerId: ["Buyer not found"] } }, { status: 400 });
   }
+  if (buyer.archivedAt) {
+    return NextResponse.json({ fieldErrors: { buyerId: ["This buyer is archived; restore it first"] } }, { status: 400 });
+  }
 
   // Order numbers are "count of existing orders + 1" — two concurrent order
   // creations could otherwise compute the same number. The transaction makes
@@ -46,14 +49,10 @@ export async function POST(req: NextRequest) {
   if (yarnTypeId) {
     const yarnType = await db.yarnType.findUnique({ where: { id: yarnTypeId } });
     if (!yarnType) return NextResponse.json({ fieldErrors: { yarnTypeId: ["Yarn type not found"] } }, { status: 400 });
-    const result = await checkFeasibility({
-      gsm: orderData.gsm,
-      qtyMetres: orderData.qtyMetres,
-      deadline: orderData.deadline,
-      wastagePct: wastagePct ?? 8,
-      yarnTypeId,
-    });
-    feasibilityResult = JSON.stringify({ ...result, yarnTypeId, checkedAt: new Date().toISOString() });
+    if (yarnType.archivedAt) {
+      return NextResponse.json({ fieldErrors: { yarnTypeId: ["This yarn type is archived; restore it first"] } }, { status: 400 });
+    }
+    feasibilityResult = await storedFeasibility({ ...orderData, yarnTypeId, wastagePct });
   }
 
   const trackingToken = generateTrackingToken();

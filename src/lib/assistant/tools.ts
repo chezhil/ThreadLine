@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { syncDerivedAlerts } from "../accounts/alerts";
 import { db } from "../db";
+import { notReversed } from "../reversals";
 import { computeCosting, ordersInProgressIn, ordersRealisedIn } from "../accounts/costing";
 import { machineOutput, machineQuality } from "../accounts/machine-output";
 import { currentMonthKey, MONTH_PATTERN, monthLabel, monthRange } from "../accounts/period";
@@ -33,7 +34,7 @@ export const TOOLS = [
   tool({
     name: "profitByOrder",
     description:
-      "Profit per order for a month: orders first invoiced in that month with revenue, true cost, profit and margin, sorted lowest profit first; plus in-progress orders' cost to date. Use for least/most profitable order, loss-making orders, order profit this month.",
+      "Profit per order for a month: orders that finished (fully dispatched or closed) in that month with revenue, true cost, profit and margin, sorted lowest profit first; plus in-progress orders' cost to date. Use for least/most profitable order, loss-making orders, order profit this month.",
     args: z.object({ month }),
     run: async ({ month: m }) => {
       const mm = m ?? currentMonthKey();
@@ -60,7 +61,7 @@ export const TOOLS = [
           orderValue: o.revenue,
         })),
         basis:
-          "An order's profit is booked in the month of its first invoice. Revenue = qty × price per metre (ex-GST). Cost = yarn from rolls + 8% process wastage + wages from attendance + power/overhead spread by machine-shifts + expenses linked to the order.",
+          "An order's profit is booked in the month it finished (its last truck left, or it was closed). Revenue = qty × price per metre (ex-GST). Cost = yarn from rolls + 8% process wastage + wages from attendance + power/overhead spread by machine-shifts + expenses linked to the order.",
       };
     },
   }),
@@ -114,7 +115,7 @@ export const TOOLS = [
     run: async ({ days }) => {
       const d = days ?? 30;
       const records = await db.qCRecord.findMany({
-        where: { inspectedAt: { gte: new Date(Date.now() - d * 86_400_000) } },
+        where: { inspectedAt: { gte: new Date(Date.now() - d * 86_400_000) }, ...notReversed },
         select: { result: true, defects: true },
       });
       const counts: Record<string, number> = {};
@@ -131,10 +132,10 @@ export const TOOLS = [
   }),
   tool({
     name: "yarnStock",
-    description: "Yarn stock per yarn type: kg remaining vs low-stock threshold, and which types are low.",
+    description: "Yarn stock per stocked (not archived) yarn type: kg remaining vs low-stock threshold, and which types are low.",
     args: z.object({ onlyLow: z.boolean().optional() }),
     run: async ({ onlyLow }) => {
-      const types = await db.yarnType.findMany({ include: { lots: { select: { qtyRemainingKg: true } } } });
+      const types = await db.yarnType.findMany({ where: { archivedAt: null }, include: { lots: { select: { qtyRemainingKg: true } } } });
       const rows = types.map((t) => {
         const remainingKg = r2(t.lots.reduce((s, l) => s + l.qtyRemainingKg, 0));
         return {
@@ -154,7 +155,8 @@ export const TOOLS = [
     args: z.object({}),
     run: async () => {
       const invoices = await db.invoice.findMany({
-        include: { payments: { select: { amount: true } }, order: { select: { orderNo: true, buyer: { select: { name: true } } } } },
+        where: notReversed,
+        include: { payments: { where: notReversed, select: { amount: true } }, order: { select: { orderNo: true, buyer: { select: { name: true } } } } },
         orderBy: { invoiceNo: "asc" },
       });
       const open = invoices

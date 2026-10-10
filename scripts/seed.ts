@@ -183,7 +183,7 @@ async function main() {
   // every seeded order as UNPAID.
   console.log("Backfilling ledger entries for seeded invoices/payments/expenses...");
   const backfilled = await backfillLedgerEntries(db);
-  console.log(`  ${backfilled.invoices} invoice(s), ${backfilled.payments} payment(s), ${backfilled.expenses} expense(s).`);
+  console.log(`  ${backfilled.invoices} invoice(s), ${backfilled.payments} payment(s), ${backfilled.expenses} expense(s), ${backfilled.reversals} reversal(s).`);
 
   console.log("Recomputing order status fields from seeded production/QC/dispatch/payment data...");
   const allOrderIds = (await db.order.findMany({ select: { id: true } })).map((o) => o.id);
