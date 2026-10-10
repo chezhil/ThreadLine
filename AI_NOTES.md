@@ -196,16 +196,28 @@ scripts. Generated with Claude (Claude Code); pending Dev's review.
   for a month) so the UI and assistant say what's missing instead of implying ₹0 is real.
 
 ### Assistant guard rails (`src/lib/assistant/`)
-- The model (Ollama, server-side only) picks one of 11 fixed read-only tools and
-  fills its arguments as JSON; tool name and arguments are validated with zod, with
-  one retry. It never writes SQL.
+- UPDATE (post-deploy): swapped from a local Ollama model to a cloud API —
+  deploying to Railway means there's no machine running `ollama serve` next to the
+  app anymore, and the whole point of this module is to degrade gracefully when the
+  model is unreachable, which Ollama's local-only nature made true by default in
+  every deployed environment. Went through two providers: first Gemini
+  (`gemini.ts`), then swapped again to Groq (`groq.ts`) since Gemini was reserved
+  for a possible future image/document-scanning feature (not built — no such
+  feature exists in this app) and Groq answers this app's plain-text tool-routing
+  and summary calls faster and more reliably on a free-tier key. `engine.ts`
+  updated each time, same interface throughout. Everything below describes the
+  design, which didn't change — only which API it calls.
+- The model (Groq, server-side only — the browser never sees the API key) picks
+  one of 11 fixed read-only tools and fills its arguments as JSON; tool name and
+  arguments are validated with zod, with one retry. It never writes SQL.
 - It then phrases the answer from the tool's JSON only. **Every number in its answer is
   checked against the query result**; if any number isn't there, its wording is
   discarded and a deterministic summary of the same data is returned, with a notice.
-- If Ollama is down or the model isn't pulled, a keyword router picks the tool and the
-  deterministic summary answers, clearly labelled "Answered without the model".
-- Config: `OLLAMA_URL` (default `http://127.0.0.1:11434`), `OLLAMA_MODEL`
-  (default `llama3.1:8b`), `OLLAMA_TIMEOUT_MS`.
+- If Groq is unreachable, unconfigured, or the model name is wrong, a keyword
+  router picks the tool and the deterministic summary answers, clearly labelled
+  "Answered without the model".
+- Config: `GROQ_API_KEY` (required — without it the assistant runs in keyword-only
+  mode), `GROQ_MODEL` (default `openai/gpt-oss-120b`), `GROQ_TIMEOUT_MS`.
 
 ### Verified (actually run, not assumed)
 - `npx tsc --noEmit`, `npm run lint`, `npm run build`: clean.

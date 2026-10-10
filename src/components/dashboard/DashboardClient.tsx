@@ -986,9 +986,9 @@ function AssistantTerminal() {
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 bg-surface-low px-2.5 py-2 text-[11px] text-gray-500">
         <span className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 bg-emerald-600" aria-hidden="true" /> Local model · read-only ERP queries
+          <span className="h-1.5 w-1.5 bg-emerald-600" aria-hidden="true" /> Groq · read-only ERP queries
         </span>
-        <span className="font-semibold text-gray-700">Ollama</span>
+        <span className="font-semibold text-gray-700">Groq</span>
       </div>
     </Panel>
   );

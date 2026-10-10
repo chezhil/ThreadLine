@@ -1,7 +1,6 @@
-// Assistant checks against a running server wired to a REAL Ollama model.
+// Assistant checks against a running server wired to the REAL Groq API.
 //
-//   ollama serve & ollama pull llama3.1:8b
-//   OLLAMA_MODEL=llama3.1:8b npm run start          (or npm run dev)
+//   GROQ_API_KEY=... npm run start          (or npm run dev)
 //   BASE=http://localhost:3000 node scripts/verify-assistant-live.mjs
 //
 // Asks the questions the owner is expected to ask and checks the guard rails

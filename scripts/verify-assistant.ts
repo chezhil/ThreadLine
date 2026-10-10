@@ -1,36 +1,38 @@
 // Checks the owner assistant's guard rails against a scripted stand-in for
-// Ollama's /api/chat (same request/response shape), so the pipeline can be
-// verified without a model installed:
+// Groq's /chat/completions endpoint (same request/response shape), so the
+// pipeline can be verified without burning real API quota:
 //
 //   DATABASE_URL="file:./dev.db" npx tsx scripts/verify-assistant.ts
 //
 // This proves the plumbing (tool whitelist, argument validation, retry, the
 // number check that discards invented figures, and the offline fallback). It
-// does not measure how well a particular local model picks tools — try that
-// with a real `ollama serve` and the questions on the Assistant page.
+// does not measure how well Groq picks tools — try that with a real
+// GROQ_API_KEY and the questions on the Assistant page.
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import type { AddressInfo } from "net";
 
-type Handler = (body: { model: string; format?: string; stream: boolean; messages: { role: string; content: string }[] }) => {
-  status?: number;
-  content?: string;
-  raw?: string;
+type GroqBody = {
+  model: string;
+  messages: { role: string; content: string }[];
+  response_format?: { type: string };
+  max_completion_tokens?: number;
 };
+type Handler = (body: GroqBody) => { status?: number; content?: string; raw?: string };
 
-let handler: Handler = () => ({ status: 500, raw: "no handler" });
-const requests: Parameters<Handler>[0][] = [];
+let handler: Handler = () => ({ status: 500, raw: JSON.stringify({ error: { message: "no handler" } }) });
+const requests: GroqBody[] = [];
 
 const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   let data = "";
   req.on("data", (c) => (data += c));
   req.on("end", () => {
-    const body = JSON.parse(data || "{}");
+    const body = JSON.parse(data || "{}") as GroqBody;
     requests.push(body);
     const out = handler(body);
     res.statusCode = out.status ?? 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(out.raw ?? JSON.stringify({ model: body.model, message: { role: "assistant", content: out.content ?? "" }, done: true }));
+    res.end(out.raw ?? JSON.stringify({ choices: [{ message: { role: "assistant", content: out.content ?? "" } }] }));
   });
 });
 
@@ -40,15 +42,16 @@ function check(name: string, cond: boolean, detail?: unknown) {
   if (!cond) failures++;
 }
 
-const isPlanner = (b: Parameters<Handler>[0]) => b.format === "json";
-const dataOf = (b: Parameters<Handler>[0]) => JSON.parse(b.messages[1].content.split("DATA:\n")[1]);
+const isPlanner = (b: GroqBody) => b.response_format?.type === "json_object";
+const dataOf = (b: GroqBody) => JSON.parse(b.messages[1].content.split("DATA:\n")[1]);
 
 async function main() {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as AddressInfo).port;
-  process.env.OLLAMA_URL = `http://127.0.0.1:${port}`;
-  process.env.OLLAMA_MODEL = "test-model";
-  process.env.OLLAMA_TIMEOUT_MS = "5000";
+  process.env.GROQ_API_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.GROQ_API_KEY = "test-key";
+  process.env.GROQ_MODEL = "test-model";
+  process.env.GROQ_TIMEOUT_MS = "5000";
   const { askAssistant, planWithRules, unverifiedNumbers } = await import("../src/lib/assistant/engine");
 
   // 1. Happy path: model plans profitByOrder, answers with numbers copied from DATA.
@@ -66,8 +69,8 @@ async function main() {
   let a = await askAssistant("Which order made the least profit this month?");
   check("llm path: tool chosen by model is run", a.mode === "llm" && a.tool === "profitByOrder" && !a.notice, a);
   check("llm path: model's answer kept when every number is in the data", !a.notice && a.answer.length > 0, a.answer);
-  check("requests: planner asks for JSON, no streaming, configured model", requests[0]?.format === "json" && requests[0]?.stream === false && requests[0]?.model === "test-model", requests[0]);
-  check("requests: answer prompt carries the query result as DATA", requests[1]?.messages[1].content.includes("DATA:"), requests[1]);
+  check("requests: planner asks for JSON, configured model", requests[0]?.response_format?.type === "json_object" && requests[0]?.model === "test-model", requests[0]);
+  check("requests: answer prompt carries the query result as DATA", requests[1]?.messages[1]?.content.includes("DATA:"), requests[1]);
 
   // 2. The model invents a number → its wording is discarded.
   handler = (b) =>
@@ -102,16 +105,16 @@ async function main() {
   a = await askAssistant("Write me a poem about looms");
   check("out of scope: no query run, says what it can answer", a.tool === null && a.data === null && /can answer|can't/i.test(a.answer), a);
 
-  // 5. Model not pulled → rules fallback naming the pull command.
-  handler = () => ({ status: 404, raw: JSON.stringify({ error: 'model "test-model" not found, try pulling it first' }) });
+  // 5. Model name wrong / not available to this key.
+  handler = () => ({ status: 404, raw: JSON.stringify({ error: { message: 'model "test-model" does not exist' } }) });
   a = await askAssistant("How much is outstanding from buyers?");
-  check("model missing: falls back, tells how to install", a.mode === "rules" && a.tool === "outstandingPayments" && /ollama pull test-model/.test(a.notice ?? ""), a);
+  check("model missing: falls back, names the config to check", a.mode === "rules" && a.tool === "outstandingPayments" && /GROQ_MODEL/.test(a.notice ?? ""), a);
 
-  // 6. Ollama not running at all.
+  // 6. Groq not reachable at all.
   server.close();
   await new Promise((r) => setTimeout(r, 100));
   a = await askAssistant("Which yarn is running low?");
-  check("ollama down: still answers from the same query", a.mode === "rules" && a.tool === "yarnStock" && /not reachable/.test(a.notice ?? ""), a);
+  check("groq down: still answers from the same query", a.mode === "rules" && a.tool === "yarnStock" && /not reachable/.test(a.notice ?? ""), a);
 
   // 7. Keyword router + number checker units.
   const cases: [string, string | null][] = [

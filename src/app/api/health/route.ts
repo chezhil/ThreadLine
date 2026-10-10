@@ -5,9 +5,8 @@ const startTime = Date.now();
 
 export async function GET(_req: NextRequest) {
   let dbHealthy = false;
-  let ollamaHealthy = false;
 
-  // 1. Check SQLite connectivity
+  // 1. Check database connectivity
   try {
     await db.$queryRawUnsafe("SELECT 1");
     dbHealthy = true;
@@ -22,7 +21,7 @@ export async function GET(_req: NextRequest) {
       {
         status: "unhealthy",
         db: false,
-        ollama: false,
+        groq: false,
         uptime: Math.floor((Date.now() - startTime) / 1000),
         error: "Database connectivity check failed",
       },
@@ -30,26 +29,14 @@ export async function GET(_req: NextRequest) {
     );
   }
 
-  // 2. Check Ollama reachability (timeout 1000ms)
-  const ollamaUrl = process.env.OLLAMA_URL || "http://127.0.0.1:11434";
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1000);
-    const res = await fetch(`${ollamaUrl}/api/version`, {
-      signal: controller.signal,
-    }).catch(() => null);
-    clearTimeout(timeout);
-    if (res && res.ok) {
-      ollamaHealthy = true;
-    }
-  } catch {
-    ollamaHealthy = false;
-  }
+  // 2. Groq is a paid cloud API, so this checks configuration, not a live
+  // call — pinging it on every health check would burn quota for no reason.
+  const groqConfigured = !!process.env.GROQ_API_KEY;
 
   return NextResponse.json({
     status: "healthy",
     db: true,
-    ollama: ollamaHealthy,
+    groq: groqConfigured,
     uptime: Math.floor((Date.now() - startTime) / 1000),
   });
 }

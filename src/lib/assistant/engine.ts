@@ -1,17 +1,18 @@
 import { currentMonthKey, monthLabel, shiftMonth } from "../accounts/period";
 import { findTool, toolCatalog, TOOLS } from "./tools";
-import { ollamaChat, OllamaUnavailableError, OLLAMA_MODEL, type ChatMessage } from "./ollama";
+import { groqChat, GroqUnavailableError, GROQ_MODEL, type ChatMessage } from "./groq";
 import { summarize } from "./summarize";
 
 // Owner assistant pipeline:
-//   1. the local model picks ONE whitelisted tool + arguments (JSON only)
+//   1. Groq picks ONE whitelisted tool + arguments (JSON only)
 //   2. the server validates both and runs the read-only query
 //   3. the model phrases an answer from that query result only
 //   4. every number in the answer is checked against the query result; if any
 //      number isn't there, the model's wording is discarded and a deterministic
 //      summary of the same result is returned instead
-// If Ollama is down, a keyword router picks the tool and the deterministic
-// summary answers, so the owner still gets a data-backed answer offline.
+// If Groq is unreachable or unconfigured, a keyword router picks the tool
+// and the deterministic summary answers, so the owner still gets a
+// data-backed answer.
 
 export interface AssistantAnswer {
   answer: string;
@@ -62,7 +63,7 @@ If no tool can answer the question, reply {"tool": null, "args": {}}.`;
   for (let attempt = 0; attempt < 2; attempt++) {
     // A plan is a few dozen tokens. The cap stops a model that loops in JSON
     // mode (seen with very small models) from holding the request until timeout.
-    const raw = await ollamaChat(messages, { json: true, maxTokens: 256 });
+    const raw = await groqChat(messages, { json: true, maxTokens: 256 });
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -209,7 +210,7 @@ export async function askAssistant(question: string): Promise<AssistantAnswer> {
   try {
     plan = await planWithModel(question);
   } catch (e) {
-    if (!(e instanceof OllamaUnavailableError)) throw e;
+    if (!(e instanceof GroqUnavailableError)) throw e;
     modelDown = e.message;
   }
 
@@ -217,7 +218,7 @@ export async function askAssistant(question: string): Promise<AssistantAnswer> {
     const rules = planWithRules(question);
     const notice = modelDown
       ? `${modelDown} Answered from the same whitelisted queries without the model.`
-      : "The local model couldn't map this question to a query, so a keyword match was used.";
+      : "Groq couldn't map this question to a query, so a keyword match was used.";
     if (!rules.tool) {
       return { answer: `I couldn't match that to any of my queries. ${CAPABILITIES}`, tool: null, args: {}, data: null, mode: "rules", verified: true, notice };
     }
@@ -233,7 +234,7 @@ export async function askAssistant(question: string): Promise<AssistantAnswer> {
       data: null,
       mode: "llm",
       verified: true,
-      model: OLLAMA_MODEL,
+      model: GROQ_MODEL,
     };
   }
 
@@ -243,7 +244,7 @@ export async function askAssistant(question: string): Promise<AssistantAnswer> {
   let answer: string;
   try {
     answer = (
-      await ollamaChat([
+      await groqChat([
         {
           role: "system",
           content: `You are the owner's assistant at Everest Textile Mills. Answer the question using ONLY the JSON in DATA, which is the result of the query "${plan.tool}".
@@ -257,8 +258,8 @@ Rules:
       ], { maxTokens: 400 }) // at most 4 short sentences
     ).trim();
   } catch (e) {
-    if (!(e instanceof OllamaUnavailableError)) throw e;
-    return { answer: fallback, tool: plan.tool, args, data, mode: "rules", verified: true, notice: `${e.message} The query was chosen by the model; the answer was written from its result without the model.`, model: OLLAMA_MODEL };
+    if (!(e instanceof GroqUnavailableError)) throw e;
+    return { answer: fallback, tool: plan.tool, args, data, mode: "rules", verified: true, notice: `${e.message} The query was chosen by the model; the answer was written from its result without the model.`, model: GROQ_MODEL };
   }
 
   const bad = unverifiedNumbers(answer, data, question);
@@ -273,8 +274,8 @@ Rules:
       notice: bad.length
         ? `The model's wording contained number(s) not in the query result (${bad.slice(0, 5).join(", ")}), so it was replaced with a summary generated directly from the data.`
         : "The model returned an empty answer, so a summary generated from the data is shown.",
-      model: OLLAMA_MODEL,
+      model: GROQ_MODEL,
     };
   }
-  return { answer, tool: plan.tool, args, data, mode: "llm", verified: true, model: OLLAMA_MODEL };
+  return { answer, tool: plan.tool, args, data, mode: "llm", verified: true, model: GROQ_MODEL };
 }

@@ -79,7 +79,7 @@ export function AssistantClient() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <PageTitle
         title="Ask the mill"
-        subtitle="Runs on a local model (Ollama). It can only run a fixed set of read-only queries and answers only from what they return; if the records don't have it, it says so."
+        subtitle="Runs on Groq. It can only run a fixed set of read-only queries and answers only from what they return; if the records don't have it, it says so."
       />
 
       <Card className="flex min-h-80 flex-col gap-3">
