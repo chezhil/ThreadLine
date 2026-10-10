@@ -10,6 +10,7 @@ import { dateIN, dateTimeIN, inr } from "@/lib/accounts/format";
 import { ErrorNote, Loading } from "@/components/accounts/Stat";
 import { OrderForm, type PickBuyer, type PickYarnType } from "./OrderForm";
 import { WhatsAppPreviewModal } from "@/components/dispatch/WhatsAppPreviewModal";
+import type { DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
 
 interface YarnLot {
   id: string;
@@ -74,6 +75,8 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
   const yarnLots = useApi<{ yarnLots: YarnLot[] }>("/api/yarn-lots");
   const [editing, setEditing] = useState(false);
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
+  const [whatsApp, setWhatsApp] = useState<{ payload: DispatchWhatsAppPayload; target: { orderId: string } } | null>(null);
+  const [whatsAppError, setWhatsAppError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [reserveForm, setReserveForm] = useState({ yarnLotId: "", qtyKg: "" });
@@ -99,6 +102,26 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
   }
 
   const o = order.data.order;
+  // The message is built by the server from the order's latest shipment.
+  const openWhatsApp = async () => {
+    setWhatsAppError(null);
+    try {
+      const res = await fetch("/api/alerts/whatsapp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: o.id, preview: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setWhatsAppError(data.error ?? "Couldn't prepare the WhatsApp message.");
+        return;
+      }
+      setWhatsApp({ payload: data.payload, target: { orderId: o.id } });
+      setWhatsAppModalOpen(true);
+    } catch {
+      setWhatsAppError("Couldn't reach the server.");
+    }
+  };
   const trackingUrl = typeof window !== "undefined" ? `${window.location.origin}/track/${o.trackingToken}` : "";
   const editable = EDITABLE.includes(o.status);
   const activeInvoice = o.invoices.find((i) => !i.reversal);
@@ -214,7 +237,9 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => setWhatsAppModalOpen(true)}
+              onClick={openWhatsApp}
+              disabled={o.dispatchStatus === "NOT_DISPATCHED"}
+              title={o.dispatchStatus === "NOT_DISPATCHED" ? "Nothing has shipped for this order yet" : undefined}
               className="text-emerald-700 hover:text-emerald-800"
             >
               Preview WhatsApp Alert
@@ -222,6 +247,11 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
           }
         />
         <p className="break-all text-sm text-brand">{trackingUrl}</p>
+        {whatsAppError && (
+          <p role="alert" className="mt-2 text-sm text-red-600">
+            {whatsAppError}
+          </p>
+        )}
       </Card>
 
       <Card>
@@ -344,16 +374,8 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
       <WhatsAppPreviewModal
         isOpen={whatsAppModalOpen}
         onClose={() => setWhatsAppModalOpen(false)}
-        payload={{
-          orderNo: o.orderNo,
-          buyerName: o.buyer.name,
-          buyerPhone: o.buyer.contact || "+919876543210",
-          fabricType: o.fabricType,
-          totalMetres: o.qtyMetres,
-          rollCount: 1,
-          truckNo: "Scheduled Vehicle",
-          trackingToken: o.trackingToken,
-        }}
+        payload={whatsApp?.payload ?? null}
+        target={whatsApp?.target ?? null}
       />
     </div>
   );

@@ -1,97 +1,168 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/auth";
+import { qualityActor } from "@/lib/quality/auth";
 import { writeTransaction } from "@/lib/concurrency";
-import { formatWhatsAppMessage, getWhatsAppShareUrl } from "@/lib/alerts/whatsapp-format";
+import { logAudit } from "@/lib/audit";
+import {
+  formatWhatsAppMessage,
+  getWhatsAppShareUrl,
+  normalizeWhatsAppPhone,
+  type DispatchWhatsAppPayload,
+} from "@/lib/alerts/whatsapp-format";
 
 export const instant = false;
 
-const sendWhatsAppAlertSchema = z.object({
-  orderNo: z.string().trim().min(1, "orderNo is required"),
-  buyerName: z.string().trim().min(1, "buyerName is required"),
-  buyerPhone: z.string().trim().min(1, "buyerPhone is required"),
-  fabricType: z.string().trim().min(1, "fabricType is required"),
-  totalMetres: z.number().nonnegative(),
-  rollCount: z.number().int().nonnegative(),
-  truckNo: z.string().trim().min(1, "truckNo is required"),
-  trackingToken: z.string().trim().min(1, "trackingToken is required"),
-  appUrl: z.string().optional(),
-});
+const TEMPLATE = "dispatch_whatsapp_manual";
+const RATE_LIMIT = 3;
+
+// The client only says WHICH dispatch/order to message. Buyer, phone, quantity,
+// truck and tracking links all come from the database: a signed-in user must
+// not be able to make the mill send an arbitrary text or link to an arbitrary
+// number under the mill's name.
+const schema = z
+  .object({
+    dispatchId: z.string().trim().min(1).optional(),
+    orderId: z.string().trim().min(1).optional(),
+    /** Just return what would be sent (for the preview modal); records nothing. */
+    preview: z.boolean().optional(),
+  })
+  .refine((v) => !!v.dispatchId !== !!v.orderId, { message: "Send exactly one of dispatchId or orderId" });
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+function appUrlFor(req: NextRequest): string {
+  const env = process.env.NEXT_PUBLIC_APP_URL;
+  if (env) return env;
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  const proto = req.headers.get("x-forwarded-proto") ?? "http";
+  return host ? `${proto}://${host}` : req.nextUrl.origin;
+}
+
+async function payloadForDispatch(dispatchId: string): Promise<DispatchWhatsAppPayload | null> {
+  const d = await db.dispatch.findUnique({
+    where: { id: dispatchId },
+    include: { buyer: true, rolls: { include: { order: true } } },
+  });
+  if (!d || !d.rolls.length) return null;
+  const orders = new Map<string, (typeof d.rolls)[number]["order"]>();
+  for (const r of d.rolls) orders.set(r.order.id, r.order);
+  const list = [...orders.values()];
+  const first = list[0];
+  return {
+    orderNo: list.map((o) => o.orderNo).join(", "),
+    buyerName: d.buyer.name,
+    buyerPhone: d.buyer.contact,
+    fabricType: [...new Set(list.map((o) => o.fabricType))].join(" / "),
+    totalMetres: round1(d.rolls.reduce((s, r) => s + r.lengthMetres, 0)),
+    rollCount: d.rolls.length,
+    truckNo: d.truckNo,
+    trackingToken: first.trackingToken,
+    tracking: list.map((o) => ({ orderNo: o.orderNo, trackingToken: o.trackingToken })),
+  };
+}
+
+async function payloadForOrder(orderId: string): Promise<DispatchWhatsAppPayload | null> {
+  const o = await db.order.findUnique({
+    where: { id: orderId },
+    include: { buyer: true, rolls: { where: { dispatchId: { not: null } }, include: { dispatch: true } } },
+  });
+  if (!o) return null;
+  const dispatched = o.rolls;
+  // Latest truck that carried this order's rolls; an order that hasn't shipped
+  // has no truck, so there is nothing to tell the buyer yet.
+  if (!dispatched.length) return null;
+  const latest = dispatched
+    .map((r) => r.dispatch)
+    .filter((x): x is NonNullable<typeof x> => !!x)
+    .sort((a, b) => b.dispatchedAt.getTime() - a.dispatchedAt.getTime())[0];
+  if (!latest) return null;
+  const onLatest = dispatched.filter((r) => r.dispatchId === latest.id);
+  return {
+    orderNo: o.orderNo,
+    buyerName: o.buyer.name,
+    buyerPhone: o.buyer.contact,
+    fabricType: o.fabricType,
+    totalMetres: round1(onLatest.reduce((s, r) => s + r.lengthMetres, 0)),
+    rollCount: onLatest.length,
+    truckNo: latest.truckNo,
+    trackingToken: o.trackingToken,
+  };
+}
 
 export async function POST(req: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const actor = await qualityActor("owner", "storekeeper");
+  if ("response" in actor) return actor.response;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const parsed = sendWhatsAppAlertSchema.safeParse(body);
+  const body = await req.json().catch(() => null);
+  const parsed = schema.safeParse(body);
   if (!parsed.success) {
+    return NextResponse.json({ error: "Validation failed", issues: parsed.error.issues }, { status: 400 });
+  }
+
+  const payload = parsed.data.dispatchId
+    ? await payloadForDispatch(parsed.data.dispatchId)
+    : await payloadForOrder(parsed.data.orderId!);
+  if (!payload) {
     return NextResponse.json(
-      { error: "Validation failed", issues: parsed.error.issues },
-      { status: 400 }
+      { error: "Nothing has shipped for that dispatch/order yet, so there is no dispatch message to send." },
+      { status: 404 },
     );
   }
 
-  const payload = parsed.data;
-  const recipientPhone = payload.buyerPhone;
-  const cleanPhone = recipientPhone.replace(/\D/g, "");
+  if (parsed.data.preview) {
+    return NextResponse.json({ preview: true, payload, target: parsed.data.dispatchId ? { dispatchId: parsed.data.dispatchId } : { orderId: parsed.data.orderId } });
+  }
 
-  // Rate Limiting Protocol: Max 3 WhatsApp notifications per hour per recipient
+  const phone = normalizeWhatsAppPhone(payload.buyerPhone);
+  if (!phone) {
+    return NextResponse.json(
+      { error: `${payload.buyerName}'s contact "${payload.buyerPhone}" isn't a usable phone number. Fix it on the buyer record first.` },
+      { status: 422 },
+    );
+  }
+
+  // Sanitized message — zero internal costs, wages, machines, or margins.
+  const message = formatWhatsAppMessage({ ...payload, appUrl: appUrlFor(req) });
+  const shareUrl = getWhatsAppShareUrl(phone, message);
+
+  // Rate limit: max 3 manual WhatsApp messages per hour per number. The count
+  // and the insert share one write transaction, so two simultaneous clicks
+  // can't both squeeze under the limit. Only these manual sends count; the
+  // automatic dispatch alerts use a different template and must not eat the
+  // budget.
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const recentAlertsCount = await db.alertDelivery.count({
-    where: {
-      recipient: { in: [recipientPhone, cleanPhone] },
-      createdAt: { gte: oneHourAgo },
-    },
-  });
-
-  if (recentAlertsCount >= 3) {
-    return NextResponse.json(
-      { error: "Rate limit: Max 3 WhatsApp notifications per hour" },
-      { status: 429 }
-    );
-  }
-
-  // Sanitized message formatting — zero internal costs, wages, machines, or margins
-  const messageText = formatWhatsAppMessage(payload);
-  const shareUrl = getWhatsAppShareUrl(recipientPhone, messageText);
-
-  const sanitizedPayload = {
-    orderNo: payload.orderNo,
-    buyerName: payload.buyerName,
-    buyerPhone: payload.buyerPhone,
-    fabricType: payload.fabricType,
-    totalMetres: payload.totalMetres,
-    rollCount: payload.rollCount,
-    truckNo: payload.truckNo,
-    trackingToken: payload.trackingToken,
-    message: messageText,
-  };
-
-  // Transactional Persistence: record dispatch alert directly into AlertDelivery outbox
-  const alert = await writeTransaction(async (tx) => {
+  const result = await writeTransaction(async (tx) => {
+    const recent = await tx.alertDelivery.count({
+      where: { channel: "WHATSAPP", templateName: TEMPLATE, recipient: phone, createdAt: { gte: oneHourAgo } },
+    });
+    if (recent >= RATE_LIMIT) return null;
     return tx.alertDelivery.create({
       data: {
         channel: "WHATSAPP",
-        recipient: recipientPhone,
-        payload: JSON.stringify(sanitizedPayload),
+        recipient: phone,
+        templateName: TEMPLATE,
+        payload: JSON.stringify({ ...payload, appUrl: undefined, message }),
+        // Click-to-chat: the user's own WhatsApp sends it, so this records that
+        // the message was handed over, not a delivery receipt.
         status: "SENT",
         sentAt: new Date(),
       },
     });
   });
 
-  return NextResponse.json({
-    success: true,
-    alertId: alert.id,
-    shareUrl,
-  });
+  if (!result) {
+    return NextResponse.json({ error: "Rate limit: Max 3 WhatsApp notifications per hour" }, { status: 429 });
+  }
+
+  await logAudit(
+    "AlertDelivery",
+    result.id,
+    "WHATSAPP_DISPATCH_PREVIEW_SENT",
+    null,
+    { orderNo: payload.orderNo, truckNo: payload.truckNo },
+    actor.user.id,
+  ).catch(() => undefined);
+
+  return NextResponse.json({ success: true, alertId: result.id, shareUrl });
 }

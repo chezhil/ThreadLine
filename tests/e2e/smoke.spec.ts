@@ -61,3 +61,14 @@ test("module 4 — archiving a worker and restoring it round-trips through the r
   await expect(row.getByText("archived", { exact: true })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Archive" })).toBeVisible();
 });
+
+test("dispatch history — WhatsApp preview shows the real buyer message and no placeholders", async ({ page }) => {
+  await loginAs(page, OWNER.name, OWNER.password);
+  await page.goto("/dispatch");
+  await page.getByRole("button", { name: /Dispatch History/ }).click();
+  await page.getByRole("button", { name: "WhatsApp" }).first().click();
+  await expect(page.getByText("Dispatch Confirmation")).toBeVisible();
+  await expect(page.getByText("/track/").first()).toBeVisible();
+  await expect(page.getByText(/demo-tracking-token|trk-|9876543210/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Open in WhatsApp/ })).toBeEnabled();
+});

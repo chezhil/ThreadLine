@@ -52,6 +52,7 @@ export default function DispatchPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
   const [whatsAppPayload, setWhatsAppPayload] = useState<DispatchWhatsAppPayload | null>(null);
+  const [whatsAppTarget, setWhatsAppTarget] = useState<{ dispatchId: string } | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -262,25 +263,8 @@ export default function DispatchPage() {
 
       showToast(`Success! Truck ${truckNo} dispatched with ${selectedRollIds.length} rolls.`);
 
-      // Trigger authentic WhatsApp preview modal for the newly dispatched truck
-      const targetBuyer = buyers.find((b) => b.id === selectedBuyerId) || data?.buyer;
-      const orderNos = Array.from(new Set(selectedRolls.map((r) => r.order?.orderNo).filter(Boolean))).join(", ") || "N/A";
-      const fabricType = selectedRolls[0]?.order?.fabricType || "Textile Fabric";
-      const trackingToken = selectedRolls[0]?.order?.trackingToken || data?.rolls?.[0]?.order?.trackingToken || "";
-
-      if (targetBuyer) {
-        setWhatsAppPayload({
-          orderNo: orderNos,
-          buyerName: targetBuyer.name,
-          buyerPhone: targetBuyer.contact || "9876543210",
-          fabricType,
-          totalMetres: Math.round(totalMetres * 10) / 10,
-          rollCount: selectedRollIds.length,
-          truckNo: truckNo.trim(),
-          trackingToken: trackingToken || `trk-${clientMutationId}`,
-        });
-        setWhatsAppModalOpen(true);
-      }
+      // Offer the buyer WhatsApp message for the truck that just left.
+      openDispatchWhatsApp(data);
 
       setSelectedRollIds([]);
       loadData();
@@ -299,23 +283,28 @@ export default function DispatchPage() {
     }
   };
 
-  const openPastDispatchWhatsApp = (disp: any) => {
-    const buyer = disp.buyer || disp.rolls?.[0]?.order?.buyer;
-    const rolls = disp.rolls || [];
-    const primaryOrder = rolls[0]?.order;
-    const orderNos = Array.from(new Set(rolls.map((r: any) => r.order?.orderNo).filter(Boolean))).join(", ") || primaryOrder?.orderNo || "N/A";
-    const totalMetres = rolls.reduce((acc: number, r: any) => acc + (r.lengthMetres || 0), 0);
+  // Built from the saved dispatch (server data), never from form state or
+  // placeholder values: the buyer must only ever be sent real details.
+  const openDispatchWhatsApp = (disp: any) => {
+    const rolls: any[] = disp?.rolls ?? [];
+    const orders = new Map<string, any>();
+    for (const r of rolls) if (r.order?.id) orders.set(r.order.id, r.order);
+    const list = [...orders.values()];
+    const buyer = disp?.buyer ?? list[0]?.buyer;
+    if (!disp?.id || !buyer || !list.length) return;
 
     setWhatsAppPayload({
-      orderNo: orderNos,
-      buyerName: buyer?.name || "Valued Buyer",
-      buyerPhone: buyer?.contact || "+919876543210",
-      fabricType: primaryOrder?.fabricType || "Textile Fabric",
-      totalMetres: Math.round(totalMetres * 10) / 10,
+      orderNo: list.map((o) => o.orderNo).join(", "),
+      buyerName: buyer.name,
+      buyerPhone: buyer.contact ?? "",
+      fabricType: Array.from(new Set(list.map((o) => o.fabricType))).join(" / "),
+      totalMetres: Math.round(rolls.reduce((acc, r) => acc + (r.lengthMetres || 0), 0) * 10) / 10,
       rollCount: rolls.length,
       truckNo: disp.truckNo,
-      trackingToken: primaryOrder?.trackingToken || "demo-tracking-token",
+      trackingToken: list[0].trackingToken,
+      tracking: list.map((o) => ({ orderNo: o.orderNo, trackingToken: o.trackingToken })),
     });
+    setWhatsAppTarget({ dispatchId: disp.id });
     setWhatsAppModalOpen(true);
   };
 
@@ -670,7 +659,7 @@ export default function DispatchPage() {
                               size="sm"
                               variant="outline"
                               className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800"
-                              onClick={() => openPastDispatchWhatsApp(disp)}
+                              onClick={() => openDispatchWhatsApp(disp)}
                             >
                               <MessageSquare className="w-3.5 h-3.5 mr-1 text-emerald-600" />
                               WhatsApp
@@ -735,6 +724,7 @@ export default function DispatchPage() {
         isOpen={whatsAppModalOpen}
         onClose={() => setWhatsAppModalOpen(false)}
         payload={whatsAppPayload}
+        target={whatsAppTarget}
       />
     </div>
   );

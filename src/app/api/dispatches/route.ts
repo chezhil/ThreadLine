@@ -25,6 +25,10 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const buyerId = searchParams.get("buyerId");
+    // A buyer's phone number and the private tracking link are only for the
+    // roles that dispatch and message buyers; QC and floor see the dispatch
+    // without them.
+    const canMessageBuyers = actor.user.role === "owner" || actor.user.role === "storekeeper";
 
     const where: Prisma.DispatchWhereInput = {};
     if (buyerId) where.buyerId = buyerId;
@@ -33,10 +37,19 @@ export async function GET(req: NextRequest) {
     const dispatches = await db.dispatch.findMany({
       where,
       include: {
-        buyer: { select: { id: true, name: true, contact: true } },
+        buyer: { select: { id: true, name: true, ...(canMessageBuyers ? { contact: true } : {}) } },
         rolls: {
           include: {
-            order: { select: { id: true, orderNo: true, status: true, fabricType: true, trackingToken: true, buyer: { select: { id: true, name: true, contact: true } } } },
+            order: {
+              select: {
+                id: true,
+                orderNo: true,
+                status: true,
+                fabricType: true,
+                ...(canMessageBuyers ? { trackingToken: true } : {}),
+                buyer: { select: { id: true, name: true, ...(canMessageBuyers ? { contact: true } : {}) } },
+              },
+            },
             machine: true,
             yarnLot: true,
           },

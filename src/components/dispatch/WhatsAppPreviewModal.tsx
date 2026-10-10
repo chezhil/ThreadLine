@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { formatWhatsAppMessage, getWhatsAppShareUrl, type DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
+import { formatWhatsAppMessage, normalizeWhatsAppPhone, type DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
 import { Check, Copy, ExternalLink, ShieldCheck, X } from "lucide-react";
 
 export interface WhatsAppPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   payload: DispatchWhatsAppPayload | null;
+  /** What the server should message about; it rebuilds the text from its own records. */
+  target: { dispatchId: string } | { orderId: string } | null;
   onSent?: (alertId: string) => void;
 }
 
@@ -60,6 +62,7 @@ export function WhatsAppPreviewModal({
   isOpen,
   onClose,
   payload,
+  target,
   onSent,
 }: WhatsAppPreviewModalProps) {
   const [copied, setCopied] = useState(false);
@@ -84,8 +87,11 @@ export function WhatsAppPreviewModal({
 
   if (!isOpen || !payload) return null;
 
-  const formattedMessage = formatWhatsAppMessage(payload);
-  const shareUrl = getWhatsAppShareUrl(payload.buyerPhone, formattedMessage);
+  const phone = normalizeWhatsAppPhone(payload.buyerPhone);
+  const formattedMessage = formatWhatsAppMessage({
+    ...payload,
+    appUrl: payload.appUrl ?? (typeof window !== "undefined" ? window.location.origin : undefined),
+  });
   const currentTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   const handleCopy = async () => {
@@ -99,32 +105,36 @@ export function WhatsAppPreviewModal({
   };
 
   const handleOpenInWhatsApp = async () => {
+    if (!target || !phone) return;
     setLoggingOutbox(true);
     setOutboxStatus("Logging to outbox...");
+    // Open the tab inside the click so popup blockers allow it, then point it
+    // at WhatsApp once the server has recorded (and rate-checked) the send.
+    const tab = window.open("", "_blank");
 
     try {
       const res = await fetch("/api/alerts/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(target),
       });
+      const data = await res.json().catch(() => ({}));
 
-      if (res.ok) {
-        const data = await res.json();
+      if (res.ok && data.shareUrl) {
         setOutboxStatus("✓ Recorded in outbox");
         if (onSent && data.alertId) onSent(data.alertId);
-      } else if (res.status === 429) {
-        const data = await res.json().catch(() => ({}));
-        setOutboxStatus(`⚠️ Rate limit: ${data.error || "Max 3/hr"}`);
+        if (tab) tab.location.href = data.shareUrl;
+        else window.location.href = data.shareUrl;
       } else {
-        setOutboxStatus("⚠️ Outbox sync failed");
+        tab?.close();
+        setOutboxStatus(`⚠️ ${data.error || "Couldn't record the message — not opened"}`);
       }
     } catch (err) {
       console.error("Failed to log alert to outbox:", err);
-      setOutboxStatus("⚠️ Outbox offline");
+      tab?.close();
+      setOutboxStatus("⚠️ Outbox offline — not opened");
     } finally {
       setLoggingOutbox(false);
-      window.open(shareUrl, "_blank");
     }
   };
 
@@ -170,7 +180,7 @@ export function WhatsAppPreviewModal({
         {/* Recipient Details Sub-header */}
         <div className="bg-[#054c44] px-4 py-1.5 text-xs text-emerald-100 flex items-center justify-between border-t border-emerald-800/40 font-mono">
           <span>To: {payload.buyerName}</span>
-          <span>+{payload.buyerPhone.replace(/\D/g, "")}</span>
+          <span>{phone ? `+${phone}` : "no valid number"}</span>
         </div>
 
         {/* WhatsApp Chat Wallpaper (#EFEAE2) */}
@@ -197,12 +207,9 @@ export function WhatsAppPreviewModal({
                 {renderWhatsAppFormattedText(formattedMessage)}
               </div>
 
-              {/* Timestamp & Double Blue Ticks (✓✓) */}
+              {/* Timestamp */}
               <div className="flex items-center justify-end gap-1 pt-1 text-[10px] text-slate-500 font-medium">
                 <span>{currentTime}</span>
-                <span className="text-[#34B7F1] font-bold text-xs leading-none" title="Delivered & Read">
-                  ✓✓
-                </span>
               </div>
             </div>
           </div>
@@ -216,6 +223,12 @@ export function WhatsAppPreviewModal({
             </div>
           </div>
         </div>
+
+        {!phone && (
+          <div className="px-4 py-1.5 bg-amber-50 border-t border-amber-200 text-[11px] text-amber-800">
+            {payload.buyerName}&apos;s contact (&ldquo;{payload.buyerPhone || "empty"}&rdquo;) isn&apos;t a usable phone number, so this can&apos;t be sent. Fix it on the buyer record.
+          </div>
+        )}
 
         {/* Outbox Status Notification */}
         {outboxStatus && (
@@ -245,7 +258,7 @@ export function WhatsAppPreviewModal({
 
           <button
             onClick={handleOpenInWhatsApp}
-            disabled={loggingOutbox}
+            disabled={loggingOutbox || !phone || !target}
             className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white transition-colors shadow-md disabled:opacity-50"
           >
             <ExternalLink className="w-4 h-4" />

@@ -1,4 +1,4 @@
-import { formatWhatsAppMessage, getWhatsAppShareUrl, type DispatchWhatsAppPayload } from "../src/lib/alerts/whatsapp-format";
+import { formatWhatsAppMessage, getWhatsAppShareUrl, normalizeWhatsAppPhone, type DispatchWhatsAppPayload } from "../src/lib/alerts/whatsapp-format";
 import { verifyMetaSignature } from "../src/lib/alerts/verify-webhook";
 import { db } from "../src/lib/db";
 import crypto from "node:crypto";
@@ -67,6 +67,13 @@ async function runVerification() {
   check("Message contains fabric type and roll count", formattedMsg.includes("Cotton Twill 2/1") && formattedMsg.includes("18 Rolls"));
   check("Share URL encodes sanitized phone number and text", shareUrl.startsWith("https://wa.me/919876543210?text="));
 
+  check("normaliser: bare 10-digit Indian mobile gets 91", normalizeWhatsAppPhone("98765 43210") === "919876543210");
+  check("normaliser: leading 0 stripped", normalizeWhatsAppPhone("098765 43210") === "919876543210");
+  check("normaliser: rejects text", normalizeWhatsAppPhone("call the office") === null);
+  check("normaliser: rejects too-short numbers", normalizeWhatsAppPhone("12345") === null);
+  const multi = formatWhatsAppMessage({ ...testPayload, orderNo: "A-1, B-2", tracking: [{ orderNo: "A-1", trackingToken: "tokA" }, { orderNo: "B-2", trackingToken: "tokB" }] });
+  check("multi-order dispatch lists a tracking link per order", multi.includes("/track/tokA") && multi.includes("/track/tokB"));
+
   // --------------------------------------------------------------------------
   // TEST 2: Zero Internal Cost Leakage
   // --------------------------------------------------------------------------
@@ -126,88 +133,77 @@ async function runVerification() {
   check("Rejects mismatched algorithm header", !verifyMetaSignature(rawPayload, `sha1=${validHmac}`));
 
   // --------------------------------------------------------------------------
-  // TEST 4: Rate-Limited Outbox Architecture (Max 3 / hour)
+  // TEST 4: Server-built message, role gate, rate limit (Max 3 / hour)
   // --------------------------------------------------------------------------
-  console.log("\n--- 4. Rate-Limited Outbox Architecture ---");
+  console.log("\n--- 4. Send route: server-built message, role gate, rate limit ---");
   const testPhone = `+9199${Math.floor(10000000 + Math.random() * 90000000)}`;
+  const send = (cookie: string | null, body: unknown) =>
+    fetch(`${BASE}/api/alerts/whatsapp/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify(body),
+    });
 
-  // Test both via direct route / HTTP client
   const cookie = await loginAsStorekeeper();
+  if (!cookie) throw new Error(`storekeeper login failed against ${BASE} — start the app on a seeded DB`);
 
-  if (cookie) {
-    console.log(`  (Running real HTTP requests against ${BASE} using storekeeper session)`);
-    const sendPayload = {
-      orderNo: "EVR-2610-014",
-      buyerName: "Test Rate Buyer",
-      buyerPhone: testPhone,
-      fabricType: "Cotton Twill",
-      totalMetres: 500,
-      rollCount: 5,
-      truckNo: "TN-38-AX-9942",
-      trackingToken: "sec_trk_rate_limit_token",
-    };
+  const dispatch = await db.dispatch.findFirst({ where: { rolls: { some: {} } }, include: { buyer: true } });
+  if (!dispatch) throw new Error("no seeded dispatch — run npm run seed");
+  const originalContact = dispatch.buyer.contact;
+  try {
+    await db.buyer.update({ where: { id: dispatch.buyerId }, data: { contact: testPhone } });
 
-    // Attempt 1: Should succeed
-    const res1 = await fetch(`${BASE}/api/alerts/whatsapp/send`, {
+    check("anonymous caller → 401", (await send(null, { dispatchId: dispatch.id })).status === 401);
+    const floor = await fetch(`${BASE}/api/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify(sendPayload),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "floor", password: "floor123" }),
     });
-    check("Attempt 1: First dispatch alert succeeds (HTTP 200)", res1.status === 200);
-
-    // Attempt 2: Should succeed
-    const res2 = await fetch(`${BASE}/api/alerts/whatsapp/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify(sendPayload),
-    });
-    check("Attempt 2: Second dispatch alert succeeds (HTTP 200)", res2.status === 200);
-
-    // Attempt 3: Should succeed
-    const res3 = await fetch(`${BASE}/api/alerts/whatsapp/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify(sendPayload),
-    });
-    check("Attempt 3: Third dispatch alert succeeds (HTTP 200)", res3.status === 200);
-
-    // Attempt 4: Should be RATE LIMITED (HTTP 429)
-    const res4 = await fetch(`${BASE}/api/alerts/whatsapp/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie },
-      body: JSON.stringify(sendPayload),
-    });
-    const body4 = await res4.json().catch(() => ({}));
-    check("Attempt 4: Fourth dispatch alert within 1 hour rejected with HTTP 429", res4.status === 429, { status: res4.status, body: body4 });
-    check("Attempt 4 error message specifies rate limit", typeof body4.error === "string" && body4.error.includes("Rate limit: Max 3 WhatsApp notifications per hour"));
-  } else {
-    // If HTTP server is not running, test directly via database queries and outbox model
-    console.log("  (Testing rate limit threshold directly via AlertDelivery persistence)");
-    const cleanPhone = testPhone.replace(/\D/g, "");
-
-    // Create 3 alerts within 1 hour
-    for (let i = 0; i < 3; i++) {
-      await db.alertDelivery.create({
-        data: {
-          channel: "WHATSAPP",
-          recipient: testPhone,
-          payload: JSON.stringify({ test: true, attempt: i + 1 }),
-          status: "SENT",
-          sentAt: new Date(),
-        },
-      });
+    const floorCookie = floor.headers.get("set-cookie")?.split(";")[0] ?? null;
+    if (floorCookie) check("floor supervisor cannot send buyer messages → 403", (await send(floorCookie, { dispatchId: dispatch.id })).status === 403);
+    if (floorCookie) {
+      const listed = await (await fetch(`${BASE}/api/dispatches`, { headers: { cookie: floorCookie } })).text();
+      check("floor's dispatch list carries no buyer phone or tracking token", !/"contact"/.test(listed) && !/trackingToken/.test(listed));
     }
+    check("neither id → 400", (await send(cookie, {})).status === 400);
+    check("both ids → 400", (await send(cookie, { dispatchId: dispatch.id, orderId: "x" })).status === 400);
+    check("unknown dispatch → 404", (await send(cookie, { dispatchId: "does-not-exist" })).status === 404);
 
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const count = await db.alertDelivery.count({
-      where: {
-        recipient: { in: [testPhone, cleanPhone] },
-        createdAt: { gte: oneHourAgo },
-      },
-    });
+    const prev = await (await send(cookie, { dispatchId: dispatch.id, preview: true })).json();
+    check("preview returns the server's payload and records nothing", prev.preview === true && prev.payload?.buyerPhone === testPhone);
+    const before = await db.alertDelivery.count({ where: { templateName: "dispatch_whatsapp_manual" } });
 
-    check("Database records 3 alerts in the last hour", count === 3);
-    check("Rate limit check rejects when count >= 3 (triggers HTTP 429 logic)", count >= 3);
+    // Client-supplied content is ignored: only ids are read.
+    const res1 = await send(cookie, { dispatchId: dispatch.id, buyerPhone: "+910000000000", appUrl: "https://evil.example", message: "pay me" });
+    const body1 = await res1.json();
+    check("Attempt 1 succeeds (HTTP 200)", res1.status === 200, body1);
+    const sentUrl = String(body1.shareUrl ?? "");
+    const digits = testPhone.replace(/\D/g, "");
+    check("share URL targets the buyer's number from the database", sentUrl.startsWith(`https://wa.me/${digits}?text=`), sentUrl);
+    check("client-supplied appUrl/message are ignored", !decodeURIComponent(sentUrl).includes("evil.example") && !decodeURIComponent(sentUrl).includes("pay me"));
+    const row = await db.alertDelivery.findFirst({ where: { recipient: digits, templateName: "dispatch_whatsapp_manual" } });
+    check("recipient stored normalised (digits only)", !!row);
+    check("exactly one outbox row written", (await db.alertDelivery.count({ where: { templateName: "dispatch_whatsapp_manual" } })) === before + 1);
+
+    check("Attempt 2 succeeds", (await send(cookie, { dispatchId: dispatch.id })).status === 200);
+    check("Attempt 3 succeeds", (await send(cookie, { dispatchId: dispatch.id })).status === 200);
+    const res4 = await send(cookie, { dispatchId: dispatch.id });
+    const body4 = await res4.json().catch(() => ({}));
+    check("Attempt 4 within an hour → 429", res4.status === 429, { status: res4.status, body: body4 });
+    check("429 message names the rate limit", typeof body4.error === "string" && body4.error.includes("Rate limit"));
+
+    // Simultaneous clicks must not slip past the limit.
+    await db.alertDelivery.deleteMany({ where: { recipient: digits, templateName: "dispatch_whatsapp_manual" } });
+    const burst = await Promise.all(Array.from({ length: 8 }, () => send(cookie, { dispatchId: dispatch.id })));
+    const ok = burst.filter((r) => r.status === 200).length;
+    check("8 simultaneous sends: at most 3 get through", ok <= 3 && ok >= 1, burst.map((r) => r.status));
+
+    // An unusable contact is refused rather than messaging nobody.
+    await db.buyer.update({ where: { id: dispatch.buyerId }, data: { contact: "call the office" } });
+    check("buyer contact that isn't a phone number → 422", (await send(cookie, { dispatchId: dispatch.id })).status === 422);
+  } finally {
+    await db.buyer.update({ where: { id: dispatch.buyerId }, data: { contact: originalContact } });
+    await db.alertDelivery.deleteMany({ where: { templateName: "dispatch_whatsapp_manual", recipient: testPhone.replace(/\D/g, "") } });
   }
 
   // --------------------------------------------------------------------------
