@@ -79,7 +79,24 @@ export async function POST(req: NextRequest) {
 
   const parsed = paymentSchema.safeParse(await readJson(req));
   if (!parsed.success) return fieldErrorResponse(zodFieldErrors(parsed.error));
-  const { invoiceId, amount, mode, receivedAt } = parsed.data;
+  const { invoiceId, amount, mode, receivedAt, clientMutationId } = parsed.data;
+
+  // Idempotency: a double-click or a retried offline-queue submission with
+  // the same clientMutationId returns the payment already recorded instead
+  // of recording the same money twice.
+  if (clientMutationId) {
+    const existing = await db.payment.findUnique({
+      where: { id: clientMutationId },
+      include: { invoice: { include: { payments: { select: { amount: true } } } } },
+    });
+    if (existing) {
+      const paidSoFar = existing.invoice.payments.reduce((s, p) => s + p.amount, 0);
+      return NextResponse.json(
+        { payment: existing, outstanding: round2(existing.invoice.total - paidSoFar) },
+        { status: 200 },
+      );
+    }
+  }
 
   const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
@@ -110,7 +127,9 @@ export async function POST(req: NextRequest) {
   let payment;
   try {
     payment = await db.$transaction(async (tx) => {
-      const created = await tx.payment.create({ data: { invoiceId, amount, mode, receivedAt: at } });
+      const created = await tx.payment.create({
+        data: { id: clientMutationId || undefined, invoiceId, amount, mode, receivedAt: at },
+      });
       const sum = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       if ((sum._sum.amount ?? 0) > invoice.total + 0.005) throw new Error("OVERPAID");
       await recomputePaymentStatus(tx, invoice.orderId);

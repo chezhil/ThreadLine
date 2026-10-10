@@ -115,6 +115,9 @@ export const paymentSchema = z.object({
   amount: money("Amount"),
   mode: z.enum(PAYMENT_MODES, { error: "Select a payment mode" }),
   receivedAt: pastOrTodayDate("Received date"),
+  // Lets a client dedupe a double-click or a retried submission — same
+  // pattern as Roll QC and Dispatch, which already take one.
+  clientMutationId: z.string().optional(),
 });
 export type PaymentInput = z.infer<typeof paymentSchema>;
 

@@ -36,6 +36,13 @@ export function MonthEndClient() {
         action={
           <div className="flex items-center gap-2 print:hidden">
             <MonthPicker month={month} onChange={setMonth} max={thisMonth} />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => window.open(`/api/accounts/month-end/export?month=${month}`, "_blank")}
+            >
+              Export CSV
+            </Button>
             <Button variant="secondary" size="sm" onClick={() => window.print()}>
               Print
             </Button>
