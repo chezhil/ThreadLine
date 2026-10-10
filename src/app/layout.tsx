@@ -24,14 +24,15 @@ export const metadata: Metadata = {
   title: "ThreadLine",
   description: "Everest Textile Mills — any order, any roll, any rupee, in seconds.",
   manifest: "/manifest.json",
+  // ?v=2 makes browsers that cached the old Next.js tab icon fetch the new one.
   // The default Next.js favicon.ico was removed: browsers prefer it over the
   // SVG below, which put the Next.js logo in the tab.
   icons: {
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon.svg?v=2", type: "image/svg+xml" },
+      { url: "/favicon-32.png?v=2", sizes: "32x32", type: "image/png" },
     ],
-    apple: "/apple-icon.png",
+    apple: "/apple-icon.png?v=2",
   },
 };
 
