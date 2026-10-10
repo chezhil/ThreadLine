@@ -175,10 +175,12 @@ export default function RollDetailPage() {
               <span className="text-slate-500">Order Status:</span>
               <Badge status={roll.order?.status || "PENDING"} />
             </div>
-            <div className="flex justify-between py-1">
-              <span className="text-slate-500">Price per Metre:</span>
-              <span className="font-bold text-slate-900">₹{roll.order?.pricePerMetre}</span>
-            </div>
+            {roll.order?.pricePerMetre != null && (
+              <div className="flex justify-between py-1">
+                <span className="text-slate-500">Price per Metre:</span>
+                <span className="font-bold text-slate-900">₹{roll.order.pricePerMetre}</span>
+              </div>
+            )}
           </div>
         </Card>
 
@@ -301,7 +303,7 @@ export default function RollDetailPage() {
                     <div className="flex items-center gap-2">
                       <Badge status={rec.result} />
                       <span className="font-bold text-slate-800">
-                        Inspector: {rec.inspectorName ?? rec.inspectorId}
+                        Inspector: {rec.inspectorName}
                       </span>
                     </div>
                     <span className="text-[11px] text-slate-400">

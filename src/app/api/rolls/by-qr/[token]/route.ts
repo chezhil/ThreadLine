@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { qualityActor, withInspectorNames } from "@/lib/quality/auth";
+import { qualityActor } from "@/lib/quality/auth";
+import { presentRolls, rollInclude } from "@/lib/quality/roll-view";
 
 export async function GET(
   _req: NextRequest,
@@ -13,25 +14,7 @@ export async function GET(
 
     const roll = await db.roll.findUnique({
       where: { qrToken: token },
-      include: {
-        order: {
-          include: {
-            buyer: true,
-          },
-        },
-        machine: true,
-        yarnLot: {
-          include: {
-            yarnType: true,
-            supplier: true,
-          },
-        },
-        workOrder: true,
-        qcRecords: {
-          orderBy: { inspectedAt: "desc" },
-        },
-        dispatch: true,
-      },
+      include: rollInclude(actor.user.role, { supplier: true }),
     });
 
     if (!roll) {
@@ -41,8 +24,8 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(await withInspectorNames(roll));
-  } catch (err: any) {
+    return NextResponse.json((await presentRolls([roll]))[0]);
+  } catch (err) {
     console.error("Failed to fetch roll by QR token:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

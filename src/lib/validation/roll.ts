@@ -6,6 +6,8 @@ export const DEFECT_TYPES = [
   { id: "uneven_weave", label: "Uneven Weave" },
 ] as const;
 
+const DEFECT_IDS = DEFECT_TYPES.map((d) => d.id) as [string, ...string[]];
+
 export const createRollSchema = z.object({
   orderId: z.string().min(1, "Order is required"),
   workOrderId: z.string().min(1, "Work Order is required"),
@@ -14,7 +16,8 @@ export const createRollSchema = z.object({
   yarnLotId: z.string().min(1, "Yarn Lot is required"),
   lengthMetres: z.coerce.number().positive("Length must be a positive number"),
   weightKg: z.coerce.number().positive("Weight must be a positive number"),
-  qcStatus: z.enum(["PENDING", "PASS", "REWORK", "REJECT"]).default("PENDING"),
+  // A new roll is always PENDING: only a QC inspection decides PASS/REWORK/
+  // REJECT (any qcStatus a client still sends is ignored).
 });
 
 export type CreateRollInput = z.infer<typeof createRollSchema>;
@@ -24,12 +27,17 @@ export const qcInspectionSchema = z
     result: z.enum(["PASS", "REWORK", "REJECT"], {
       message: "Result must be PASS, REWORK, or REJECT",
     }),
-    defects: z.array(z.string()).default([]),
+    defects: z
+      .array(z.enum(DEFECT_IDS, { message: "Unknown defect type" }))
+      .default([])
+      .transform((list) => Array.from(new Set(list))),
     notes: z.string().optional().nullable(),
     // Ignored by the API (the signed-in user is the inspector); kept optional
     // so queued offline submissions that still carry it remain valid.
     inspectorId: z.string().optional(),
-    clientMutationId: z.string().optional(), // For idempotent offline queue sync
+    clientMutationId: z.string().max(100).optional(), // For idempotent offline queue sync
+    // When an offline-queued inspection was actually made (set by the queue).
+    clientRecordedAt: z.string().datetime({ offset: true }).optional(),
   })
   .refine(
     (data) => {

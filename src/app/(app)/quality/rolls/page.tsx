@@ -45,10 +45,11 @@ export default function RollsListPage() {
   const [submittingMint, setSubmittingMint] = useState(false);
   const [mintErrors, setMintErrors] = useState<Record<string, string>>({});
 
-  // Dropdown lists
-  const [orders, setOrders] = useState<any[]>([]);
-  const [machines, setMachines] = useState<any[]>([]);
-  const [yarnLots, setYarnLots] = useState<any[]>([]);
+  // Dropdown source: weaving work orders, each with its order, loom and the
+  // yarn lots reserved for that order (GET /api/rolls/mint-options).
+  const [mintOptions, setMintOptions] = useState<MintWorkOrder[]>([]);
+  const [mintOptionsError, setMintOptionsError] = useState<string | null>(null);
+  const selectedWorkOrder = mintOptions.find((w) => w.id === mintData.workOrderId);
 
   // Reload by bumping the key; the fetch itself lives inside the effect.
   const [reloadKey, setReloadKey] = useState(0);
@@ -80,41 +81,32 @@ export default function RollsListPage() {
     fetchRolls();
   });
 
+  const pickWorkOrder = (wo: MintWorkOrder | undefined) => {
+    setMintData((prev) => ({
+      ...prev,
+      workOrderId: wo?.id ?? "",
+      orderId: wo?.order.id ?? "",
+      machineId: wo?.machine.id ?? "",
+      yarnLotId: wo?.yarnLots[0]?.id ?? "",
+    }));
+  };
+
   const openMintDrawer = async () => {
     setIsMintOpen(true);
     setMintErrors({});
-    // Extract unique orders, machines, and yarnLots from existing rolls or default
+    setMintOptionsError(null);
     try {
-      const ordersMap = new Map();
-      const machinesMap = new Map();
-      const yarnLotsMap = new Map();
-
-      rolls.forEach((r) => {
-        if (r.order) ordersMap.set(r.order.id, r.order);
-        if (r.machine) machinesMap.set(r.machine.id, r.machine);
-        if (r.yarnLot) yarnLotsMap.set(r.yarnLot.id, r.yarnLot);
-      });
-
-      setOrders(Array.from(ordersMap.values()));
-      setMachines(Array.from(machinesMap.values()));
-      setYarnLots(Array.from(yarnLotsMap.values()));
-
-      if (ordersMap.size > 0 && !mintData.orderId) {
-        const firstOrder = Array.from(ordersMap.values())[0];
-        setMintData((prev) => ({
-          ...prev,
-          orderId: firstOrder.id,
-          workOrderId: firstOrder.id, // fallback
-        }));
+      const res = await fetch("/api/rolls/mint-options");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        setMintOptionsError(data?.error ?? `Couldn't load work orders (HTTP ${res.status})`);
+        return;
       }
-      if (machinesMap.size > 0 && !mintData.machineId) {
-        setMintData((prev) => ({ ...prev, machineId: Array.from(machinesMap.values())[0].id }));
-      }
-      if (yarnLotsMap.size > 0 && !mintData.yarnLotId) {
-        setMintData((prev) => ({ ...prev, yarnLotId: Array.from(yarnLotsMap.values())[0].id }));
-      }
-    } catch (err) {
-      console.error(err);
+      const list: MintWorkOrder[] = data.workOrders;
+      setMintOptions(list);
+      if (!list.some((w) => w.id === mintData.workOrderId)) pickWorkOrder(list[0]);
+    } catch {
+      setMintOptionsError("Couldn't load work orders. Check the connection.");
     }
   };
 
@@ -134,7 +126,7 @@ export default function RollsListPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ error: `Server error (HTTP ${res.status})` }));
       if (!res.ok) {
         if (data.fieldErrors) {
           setMintErrors(data.fieldErrors);
@@ -147,8 +139,8 @@ export default function RollsListPage() {
       setIsMintOpen(false);
       fetchRolls();
       setSelectedRollForPrint(data);
-    } catch (err: any) {
-      setMintErrors({ form: err.message || "Network error" });
+    } catch {
+      setMintErrors({ form: "Network error. Check the connection and try again." });
     } finally {
       setSubmittingMint(false);
     }
@@ -319,37 +311,34 @@ export default function RollsListPage() {
             </div>
           )}
 
+          {mintOptionsError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
+              {mintOptionsError}
+            </div>
+          )}
+          {!mintOptionsError && mintOptions.length === 0 && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              No weaving work order is open for an order in production. Create one under Production → Work orders first.
+            </div>
+          )}
+
           <Select
-            label="Associated Order *"
-            value={mintData.orderId}
-            onChange={(e) => {
-              setMintData({
-                ...mintData,
-                orderId: e.target.value,
-                workOrderId: e.target.value, // link
-              });
-            }}
-            error={mintErrors.orderId}
+            label="Weaving work order *"
+            value={mintData.workOrderId}
+            onChange={(e) => pickWorkOrder(mintOptions.find((w) => w.id === e.target.value))}
+            error={mintErrors.workOrderId || mintErrors.orderId}
           >
-            {orders.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.orderNo} ({o.fabricType} - {o.colour})
+            {mintOptions.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.order.orderNo} · {w.order.fabricType} {w.order.colour} · {w.machine.name} ({w.producedQty}/{w.plannedQty} m)
               </option>
             ))}
           </Select>
 
-          <Select
-            label="Machine *"
-            value={mintData.machineId}
-            onChange={(e) => setMintData({ ...mintData, machineId: e.target.value })}
-            error={mintErrors.machineId}
-          >
-            {machines.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} ({m.type.toUpperCase()})
-              </option>
-            ))}
-          </Select>
+          <div className="text-xs text-slate-600">
+            Loom: <span className="font-semibold text-slate-900">{selectedWorkOrder?.machine.name ?? "—"}</span>
+            {mintErrors.machineId && <span className="block text-rose-600">{mintErrors.machineId}</span>}
+          </div>
 
           <Select
             label="Shift *"
@@ -367,9 +356,9 @@ export default function RollsListPage() {
             onChange={(e) => setMintData({ ...mintData, yarnLotId: e.target.value })}
             error={mintErrors.yarnLotId}
           >
-            {yarnLots.map((l) => (
+            {(selectedWorkOrder?.yarnLots ?? []).map((l) => (
               <option key={l.id} value={l.id}>
-                {l.lotNo} ({l.yarnType?.name || "Yarn"})
+                {l.lotNo} ({l.yarnType})
               </option>
             ))}
           </Select>
@@ -407,6 +396,7 @@ export default function RollsListPage() {
               variant="primary"
               className="flex-1"
               isLoading={submittingMint}
+              disabled={!mintData.workOrderId || !mintData.yarnLotId}
             >
               Mint Roll & Generate QR
             </Button>
@@ -442,4 +432,14 @@ export default function RollsListPage() {
       />
     </div>
   );
+}
+
+interface MintWorkOrder {
+  id: string;
+  status: string;
+  plannedQty: number;
+  producedQty: number;
+  order: { id: string; orderNo: string; fabricType: string; colour: string };
+  machine: { id: string; name: string; type: string };
+  yarnLots: { id: string; lotNo: string; yarnType: string }[];
 }
