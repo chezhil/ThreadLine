@@ -1,16 +1,23 @@
 import { openDB, DBSchema, IDBPDatabase } from "idb";
 
 export interface QueuedMutation {
-  id: string; // client-generated UUID
+  id: string; // client-generated UUID, sent as clientMutationId
   type: "qc_entry" | "production_log" | "roll_scan" | "dispatch" | string;
   url: string;
   method: "POST" | "PUT" | "PATCH";
-  payload: any;
+  payload: Record<string, unknown>;
   createdAt: string;
   status: "pending" | "syncing" | "failed";
   attempts: number;
+  // The signed-in user who queued it. Only that user's session replays it,
+  // so a shared tablet never posts one person's inspections under another's
+  // login.
+  userId?: string;
   lastError?: string;
   nextRetryAt?: string;
+  // Set when the server answered 401/403: the item is kept (not failed) and
+  // waits until its user signs in again.
+  needsSignIn?: boolean;
 }
 
 interface ThreadLineDB extends DBSchema {
@@ -28,6 +35,10 @@ let dbPromise: Promise<IDBPDatabase<ThreadLineDB>> | null = null;
 
 // In-memory fallback store for Node.js test environments or when IndexedDB is unavailable
 const memoryStore: Map<string, QueuedMutation> = new Map();
+
+// Test hooks: the Node test script has no window/same-origin cookie, so it
+// sets these on globalThis. A browser never reads them.
+const testGlobals = globalThis as unknown as { __BASE_URL__?: string; __AUTH_COOKIE__?: string };
 
 function isIndexedDBAvailable() {
   return typeof window !== "undefined" && "indexedDB" in window;
@@ -48,33 +59,69 @@ async function getDB() {
   return dbPromise;
 }
 
-export type QueueSubscriber = (count: number, isSyncing: boolean) => void;
+async function putItem(item: QueuedMutation) {
+  const db = await getDB();
+  if (db) await db.put(STORE_NAME, item);
+  else memoryStore.set(item.id, item);
+}
+
+async function deleteItem(id: string) {
+  const db = await getDB();
+  if (db) await db.delete(STORE_NAME, id);
+  else memoryStore.delete(id);
+}
+
+export type QueueSubscriber = (count: number, isSyncing: boolean, failedCount: number) => void;
 const subscribers: Set<QueueSubscriber> = new Set();
 let isCurrentlySyncing = false;
-let syncDebounceTimer: any = null;
+let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let currentUserId: string | null = null;
 
-function notifySubscribers(count: number) {
-  subscribers.forEach((fn) => fn(count, isCurrentlySyncing));
+async function notifySubscribers() {
+  const [count, failed] = await Promise.all([getPendingCount(), getFailedCount()]);
+  subscribers.forEach((fn) => fn(count, isCurrentlySyncing, failed));
 }
 
 export function subscribeToOfflineQueue(callback: QueueSubscriber) {
   subscribers.add(callback);
-  getPendingCount().then((count) => callback(count, isCurrentlySyncing));
+  Promise.all([getPendingCount(), getFailedCount()]).then(([count, failed]) =>
+    callback(count, isCurrentlySyncing, failed),
+  );
   return () => {
     subscribers.delete(callback);
   };
 }
 
+/** Scope the queue to the signed-in user (called by the app shell). */
+export function setOfflineQueueUser(userId: string | null) {
+  currentUserId = userId;
+  void notifySubscribers();
+}
+
+/** A client mutation id. crypto.randomUUID only exists in secure contexts,
+ * and the mill tablets may reach the app over plain http on the LAN. */
+export function newMutationId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") crypto.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return `offline-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /**
- * Enqueue a mutation for offline replay
+ * Enqueue a mutation for offline replay. Pass `id` to reuse the
+ * clientMutationId of an online attempt that may already have reached the
+ * server, so the replay is recognised as the same write.
  */
 export async function enqueueOfflineMutation(
   type: string,
   url: string,
   method: "POST" | "PUT" | "PATCH",
-  payload: any
+  payload: Record<string, unknown>,
+  opts: { id?: string } = {},
 ): Promise<QueuedMutation> {
-  const id = crypto.randomUUID ? crypto.randomUUID() : `offline-${Date.now()}-${Math.random()}`;
+  const id = opts.id ?? newMutationId();
+  const createdAt = new Date().toISOString();
 
   const mutation: QueuedMutation = {
     id,
@@ -84,53 +131,63 @@ export async function enqueueOfflineMutation(
     payload: {
       ...payload,
       clientMutationId: id,
+      clientRecordedAt: createdAt,
     },
-    createdAt: new Date().toISOString(),
+    createdAt,
     status: "pending",
     attempts: 0,
+    userId: currentUserId ?? undefined,
   };
 
-  const db = await getDB();
-  if (db) {
-    await db.put(STORE_NAME, mutation);
-  } else {
-    memoryStore.set(id, mutation);
-  }
-
-  const count = await getPendingCount();
-  notifySubscribers(count);
-
+  await putItem(mutation);
+  await notifySubscribers();
   return mutation;
 }
 
-/**
- * Get count of pending items
- */
-export async function getPendingCount(): Promise<number> {
+/** Items the current user may replay (legacy items without a user count as theirs). */
+function mine(item: QueuedMutation) {
+  return !item.userId || !currentUserId || item.userId === currentUserId;
+}
+
+async function readAll(): Promise<QueuedMutation[]> {
   const db = await getDB();
   if (db) {
     try {
-      const all = await db.getAll(STORE_NAME);
-      return all.filter((item) => item.status === "pending" || item.status === "syncing").length;
+      return await db.getAll(STORE_NAME);
     } catch {
-      return 0;
+      return [];
     }
-  } else {
-    return Array.from(memoryStore.values()).filter(
-      (item) => item.status === "pending" || item.status === "syncing"
-    ).length;
-  }
-}
-
-/**
- * Get all queued items
- */
-export async function getAllQueuedItems(): Promise<QueuedMutation[]> {
-  const db = await getDB();
-  if (db) {
-    return db.getAll(STORE_NAME);
   }
   return Array.from(memoryStore.values());
+}
+
+/** Count of the current user's items still waiting to sync. */
+export async function getPendingCount(): Promise<number> {
+  return (await readAll()).filter((i) => mine(i) && (i.status === "pending" || i.status === "syncing")).length;
+}
+
+/** Count of the current user's items the server rejected. */
+export async function getFailedCount(): Promise<number> {
+  return (await readAll()).filter((i) => mine(i) && i.status === "failed").length;
+}
+
+/** The current user's queued items, oldest first. */
+export async function getAllQueuedItems(): Promise<QueuedMutation[]> {
+  return (await readAll()).filter(mine).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** Put a failed item back in line. */
+export async function retryQueuedItem(id: string) {
+  const item = (await readAll()).find((i) => i.id === id);
+  if (!item) return;
+  await putItem({ ...item, status: "pending", nextRetryAt: undefined, lastError: undefined });
+  await notifySubscribers();
+}
+
+/** Drop an item the user decided not to send. */
+export async function discardQueuedItem(id: string) {
+  await deleteItem(id);
+  await notifySubscribers();
 }
 
 /**
@@ -143,8 +200,10 @@ function calculateBackoffWithJitter(attempts: number): number {
   return exponential + jitter;
 }
 
+const TRANSIENT = new Set([408, 425, 429, 500, 502, 503, 504]);
+
 /**
- * Replay the offline queue with backoff and idempotency handling
+ * Replay the offline queue, oldest first, with backoff and idempotency handling
  */
 export async function replayOfflineQueue(): Promise<{
   successCount: number;
@@ -153,17 +212,15 @@ export async function replayOfflineQueue(): Promise<{
   if (isCurrentlySyncing) return { successCount: 0, failureCount: 0 };
 
   isCurrentlySyncing = true;
-  let count = await getPendingCount();
-  notifySubscribers(count);
+  await notifySubscribers();
 
   let successCount = 0;
   let failureCount = 0;
-  const db = await getDB();
+  const inBrowser = typeof window !== "undefined" && typeof document !== "undefined";
 
   try {
-    const all = db ? await db.getAll(STORE_NAME) : Array.from(memoryStore.values());
     const now = Date.now();
-    const pendingItems = all.filter((i) => {
+    const pendingItems = (await getAllQueuedItems()).filter((i) => {
       if (i.status !== "pending" && i.status !== "syncing") return false;
       if (i.nextRetryAt && new Date(i.nextRetryAt).getTime() > now) return false;
       return true;
@@ -171,83 +228,85 @@ export async function replayOfflineQueue(): Promise<{
 
     for (const item of pendingItems) {
       try {
-        // Mark as syncing
-        const updatedItem = { ...item, status: "syncing" as const };
-        if (db) await db.put(STORE_NAME, updatedItem);
-        else memoryStore.set(item.id, updatedItem);
+        await putItem({ ...item, status: "syncing" });
 
-        const fullUrl = item.url.startsWith("http")
-          ? item.url
-          : `${(globalThis as any).__BASE_URL__ || "http://localhost:3000"}${item.url}`;
-
+        // In the browser the queued relative URL goes to the app's own origin
+        // with the session cookie. Only the Node test harness needs a base URL
+        // and an explicit cookie.
         const headers: Record<string, string> = { "Content-Type": "application/json" };
-        const authCookie = (globalThis as any).__AUTH_COOKIE__ || item.payload?.cookie;
-        if (authCookie) {
-          headers["cookie"] = authCookie;
+        let fullUrl = item.url;
+        if (!inBrowser) {
+          if (!item.url.startsWith("http")) fullUrl = `${testGlobals.__BASE_URL__ ?? "http://localhost:3000"}${item.url}`;
+          if (testGlobals.__AUTH_COOKIE__) headers["cookie"] = testGlobals.__AUTH_COOKIE__;
         }
 
         const res = await fetch(fullUrl, {
           method: item.method,
           headers,
+          credentials: "same-origin",
           body: JSON.stringify(item.payload),
         });
 
         if (res.ok) {
-          // Successfully synced -> delete from queue
-          if (db) await db.delete(STORE_NAME, item.id);
-          else memoryStore.delete(item.id);
+          await deleteItem(item.id);
           successCount++;
-        } else if (res.status === 500 || res.status === 503) {
-          // Transient server error -> apply exponential backoff with jitter
+        } else if (res.status === 401 || res.status === 403) {
+          // Signed out or session expired: keep the item for when its user
+          // signs in again, and stop — every later item would get the same.
+          await putItem({
+            ...item,
+            status: "pending",
+            needsSignIn: true,
+            lastError: "Sign in again to send this",
+          });
+          failureCount++;
+          break;
+        } else if (TRANSIENT.has(res.status)) {
           const attempts = item.attempts + 1;
           const delayMs = calculateBackoffWithJitter(attempts);
-          const nextRetryAt = new Date(Date.now() + delayMs).toISOString();
-
-          const retryingItem: QueuedMutation = {
+          await putItem({
             ...item,
             status: "pending",
             attempts,
-            nextRetryAt,
+            needsSignIn: false,
+            nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
             lastError: `HTTP ${res.status}: Temporary server error. Retrying in ${Math.round(delayMs / 1000)}s`,
-          };
-
-          if (db) await db.put(STORE_NAME, retryingItem);
-          else memoryStore.set(item.id, retryingItem);
+          });
           failureCount++;
         } else {
-          // Client rejection (400, 403, 404, etc.)
-          const errData = await res.json().catch(() => ({}));
-          const failedItem: QueuedMutation = {
+          // The server rejected it (400, 404, 409...): keep it visible so the
+          // user can read why and retry or discard it.
+          const errData = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            fieldErrors?: Record<string, unknown>;
+          };
+          const fieldMsg = errData.fieldErrors
+            ? Object.values(errData.fieldErrors).flat().filter(Boolean).join("; ")
+            : "";
+          await putItem({
             ...item,
             status: "failed",
             attempts: item.attempts + 1,
-            lastError: errData.error || `HTTP ${res.status}`,
-          };
-
-          if (db) await db.put(STORE_NAME, failedItem);
-          else memoryStore.set(item.id, failedItem);
+            needsSignIn: false,
+            lastError: errData.error || fieldMsg || `HTTP ${res.status}`,
+          });
           failureCount++;
         }
-      } catch (networkErr: any) {
+      } catch (networkErr) {
         // Network drop during sync -> revert to pending and stop loop
-        const pendingItem: QueuedMutation = {
+        await putItem({
           ...item,
           status: "pending",
           attempts: item.attempts + 1,
-          lastError: networkErr.message || "Network unreachable",
-        };
-
-        if (db) await db.put(STORE_NAME, pendingItem);
-        else memoryStore.set(item.id, pendingItem);
-
+          lastError: networkErr instanceof Error && networkErr.message ? networkErr.message : "Network unreachable",
+        });
         failureCount++;
-        break; // Stop replaying if network dropped
+        break;
       }
     }
   } finally {
     isCurrentlySyncing = false;
-    count = await getPendingCount();
-    notifySubscribers(count);
+    await notifySubscribers();
   }
 
   return { successCount, failureCount };

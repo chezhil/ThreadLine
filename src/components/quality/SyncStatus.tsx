@@ -5,6 +5,9 @@ import {
   subscribeToOfflineQueue,
   replayOfflineQueue,
   getAllQueuedItems,
+  setOfflineQueueUser,
+  retryQueuedItem,
+  discardQueuedItem,
   QueuedMutation,
 } from "@/lib/offline-queue";
 import { Button } from "@/components/quality/ui/Button";
@@ -13,9 +16,10 @@ import { WifiOff, RefreshCw, Upload, Download, CheckCircle2, AlertTriangle } fro
 
 // Module 3's offline sync indicator and DB backup/restore, shown in the app
 // header. Registers the PWA service worker.
-export function SyncStatus({ canBackup }: { canBackup: boolean }) {
+export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: string }) {
   const isOnline = useSyncExternalStore(subscribeToOnline, () => navigator.onLine, () => true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [queuedItems, setQueuedItems] = useState<QueuedMutation[]>([]);
@@ -24,6 +28,9 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
+      // Only this user's queued writes are counted and replayed.
+      setOfflineQueueUser(userId);
+
       // Replay queued writes as soon as the connection is back.
       const handleOnline = () => {
         replayOfflineQueue();
@@ -37,17 +44,35 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
         });
       }
 
-      const unsubscribe = subscribeToOfflineQueue((count, syncing) => {
+      const unsubscribe = subscribeToOfflineQueue((count, syncing, failed) => {
         setPendingCount(count);
         setIsSyncing(syncing);
+        setFailedCount(failed);
       });
+
+      // Writes queued in an earlier visit (tab closed while offline) never
+      // see an "online" event, so send them as soon as the shell loads.
+      if (navigator.onLine) replayOfflineQueue();
 
       return () => {
         window.removeEventListener("online", handleOnline);
         unsubscribe();
       };
     }
-  }, []);
+  }, [userId]);
+
+  const refreshQueue = async () => setQueuedItems(await getAllQueuedItems());
+
+  const handleRetry = async (id: string) => {
+    await retryQueuedItem(id);
+    await replayOfflineQueue();
+    await refreshQueue();
+  };
+
+  const handleDiscard = async (id: string) => {
+    await discardQueuedItem(id);
+    await refreshQueue();
+  };
 
   const handleOpenQueue = async () => {
     const items = await getAllQueuedItems();
@@ -114,6 +139,8 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
               ? "bg-rose-50 text-rose-700 border-rose-200"
               : isSyncing
               ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+              : failedCount > 0
+              ? "bg-rose-50 text-rose-700 border-rose-200"
               : pendingCount > 0
               ? "bg-amber-50 text-amber-700 border-amber-200"
               : "bg-emerald-50 text-emerald-700 border-emerald-200"
@@ -128,6 +155,13 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
             <>
               <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin" />
               <span>Syncing ({pendingCount} pending)</span>
+            </>
+          ) : failedCount > 0 ? (
+            <>
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>
+                {failedCount} not synced{pendingCount > 0 ? `, ${pendingCount} pending` : ""}
+              </span>
             </>
           ) : pendingCount > 0 ? (
             <>
@@ -245,8 +279,20 @@ export function SyncStatus({ canBackup }: { canBackup: boolean }) {
                       {item.lastError}
                     </div>
                   )}
-                  <div className="text-[10px] text-slate-400">
-                    Created: {new Date(item.createdAt).toLocaleTimeString()}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-slate-400">
+                      Created: {new Date(item.createdAt).toLocaleString()}
+                    </span>
+                    {item.status === "failed" && (
+                      <span className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => handleRetry(item.id)} disabled={!isOnline}>
+                          Retry
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDiscard(item.id)}>
+                          Discard
+                        </Button>
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

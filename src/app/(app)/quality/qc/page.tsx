@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { Drawer } from "@/components/quality/ui/Drawer";
 import { QrScannerModal } from "@/components/rolls/QrScannerModal";
 import { RollQrLabel } from "@/components/rolls/RollQrLabel";
-import { enqueueOfflineMutation } from "@/lib/offline-queue";
+import { enqueueOfflineMutation, newMutationId } from "@/lib/offline-queue";
 import { DEFECT_TYPES } from "@/lib/validation/roll";
 import {
   Scan,
@@ -140,6 +140,10 @@ export default function QcQueuePage() {
     setSubmitting(true);
     setFormErrors({});
 
+    // One id for both the online attempt and any offline fallback, so a
+    // request that reached the server before the connection dropped is not
+    // saved twice when the queue replays it.
+    const clientMutationId = newMutationId();
     const payload = {
       result: qcResult,
       defects: selectedDefects,
@@ -153,7 +157,8 @@ export default function QcQueuePage() {
           "qc_entry",
           `/api/rolls/${selectedRoll.id}/qc`,
           "POST",
-          payload
+          payload,
+          { id: clientMutationId }
         );
 
         // Optimistically update local roll state
@@ -187,10 +192,10 @@ export default function QcQueuePage() {
       const res = await fetch(`/api/rolls/${selectedRoll.id}/qc`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, clientMutationId }),
       });
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({ error: `Server error (HTTP ${res.status})` }));
       if (!res.ok) {
         if (resData.fieldErrors) {
           setFormErrors(resData.fieldErrors);
@@ -204,13 +209,14 @@ export default function QcQueuePage() {
       showToast(`QC completed: ${selectedRoll.rollNo} marked as ${qcResult}`);
       setIsInspectDrawerOpen(false);
       fetchRolls();
-    } catch (err: any) {
+    } catch {
       // Network drop during call -> fallback to offline queue
       await enqueueOfflineMutation(
         "qc_entry",
         `/api/rolls/${selectedRoll.id}/qc`,
         "POST",
-        payload
+        payload,
+        { id: clientMutationId }
       );
       setRolls((prev) =>
         prev.map((r) => (r.id === selectedRoll.id ? { ...r, qcStatus: qcResult } : r))

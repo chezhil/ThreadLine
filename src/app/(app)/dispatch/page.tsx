@@ -11,7 +11,7 @@ import { Select } from "@/components/quality/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/quality/ui/Table";
 import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { QrScannerModal } from "@/components/rolls/QrScannerModal";
-import { enqueueOfflineMutation } from "@/lib/offline-queue";
+import { enqueueOfflineMutation, newMutationId } from "@/lib/offline-queue";
 import { GST_RATE } from "@/lib/billing";
 import {
   Truck,
@@ -181,6 +181,8 @@ export default function DispatchPage() {
     setSubmitting(true);
     setFormErrors({});
 
+    // Same id for the online attempt and the offline fallback (see QC page).
+    const clientMutationId = newMutationId();
     const payload = {
       buyerId: selectedBuyerId,
       truckNo: truckNo.trim(),
@@ -190,7 +192,7 @@ export default function DispatchPage() {
     try {
       if (!navigator.onLine) {
         // OFFLINE: Queue dispatch mutation in IndexedDB
-        await enqueueOfflineMutation("dispatch", "/api/dispatches", "POST", payload);
+        await enqueueOfflineMutation("dispatch", "/api/dispatches", "POST", payload, { id: clientMutationId });
 
         // Optimistically remove dispatched rolls from local stock
         setAvailableRolls((prev) =>
@@ -205,10 +207,10 @@ export default function DispatchPage() {
       const res = await fetch("/api/dispatches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, clientMutationId }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ error: `Server error (HTTP ${res.status})` }));
       if (!res.ok) {
         if (data.fieldErrors) {
           setFormErrors(data.fieldErrors);
@@ -222,9 +224,9 @@ export default function DispatchPage() {
       setSelectedRollIds([]);
       loadData();
       setActiveTab("history");
-    } catch (err: any) {
+    } catch {
       // Network drop -> fallback offline
-      await enqueueOfflineMutation("dispatch", "/api/dispatches", "POST", payload);
+      await enqueueOfflineMutation("dispatch", "/api/dispatches", "POST", payload, { id: clientMutationId });
       setAvailableRolls((prev) =>
         prev.filter((r) => !selectedRollIds.includes(r.id))
       );
@@ -240,10 +242,13 @@ export default function DispatchPage() {
   const selectedRolls = availableRolls.filter((r) => selectedRollIds.includes(r.id));
   const totalMetres = selectedRolls.reduce((acc, r) => acc + r.lengthMetres, 0);
   const totalWeight = selectedRolls.reduce((acc, r) => acc + r.weightKg, 0);
-  const samplePricePerMetre = selectedRolls[0]?.order?.pricePerMetre || 120;
-  const subtotal = totalMetres * samplePricePerMetre;
+  // Shipment value at each roll's own order price (a truck can carry rolls of
+  // several orders for the same buyer).
+  const subtotal = selectedRolls.reduce((acc, r) => acc + r.lengthMetres * (r.order?.pricePerMetre ?? 0), 0);
   const gst = subtotal * GST_RATE; // Module 1's GST rate, same as the real invoice
   const invoiceTotal = subtotal + gst;
+  const ordersOnTruck = Array.from(new Map(selectedRolls.map((r) => [r.orderId, r.order])).values());
+  const toInvoice = ordersOnTruck.filter((o) => o && !(o.invoices?.length));
 
   return (
     <div className="space-y-6">
@@ -483,7 +488,12 @@ export default function DispatchPage() {
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    The order&apos;s GST invoice covers its full quantity and is raised once, with its first truck.
+                    Each order&apos;s GST invoice covers its full quantity and is raised once, with its first truck.
+                    {toInvoice.length > 0
+                      ? ` This truck raises it for ${toInvoice.map((o) => o.orderNo).join(", ")}.`
+                      : ordersOnTruck.length > 0
+                        ? " Every order on this truck is already invoiced."
+                        : ""}
                   </p>
                 </div>
 
