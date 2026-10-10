@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import type { RealtimeEvent } from "./realtime";
 
@@ -41,4 +41,28 @@ export function useRealtimeEvent<T = unknown>(
       s.off(event, listener);
     };
   }, [event]);
+}
+
+/** Whether the live event socket is connected right now — drives the
+ * header's "Live" telemetry chip. */
+export function useRealtimeConnected(): boolean {
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    const s = getSocket();
+    const up = () => setConnected(true);
+    const down = () => setConnected(false);
+    s.on("connect", up);
+    s.on("disconnect", down);
+    s.on("connect_error", down);
+    // Sync with a socket that connected before this component mounted.
+    queueMicrotask(() => setConnected(s.connected));
+    return () => {
+      s.off("connect", up);
+      s.off("disconnect", down);
+      s.off("connect_error", down);
+    };
+  }, []);
+
+  return connected;
 }

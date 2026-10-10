@@ -21,6 +21,9 @@ export const statusColor = {
   unpaid: "red",
   partial: "amber",
   paid: "green",
+  // Work order statuses (Module 2)
+  in_progress: "amber",
+  completed: "green",
   // AlertDelivery outbox statuses (src/lib/alerts/outbox.ts)
   sent: "green",
   retrying: "amber",
@@ -33,10 +36,10 @@ export const statusColor = {
 export type StatusColorKey = keyof typeof statusColor;
 
 export const colorClasses: Record<"green" | "amber" | "red" | "grey", string> = {
-  green: "bg-green-100 text-green-800 border-green-300",
-  amber: "bg-amber-100 text-amber-800 border-amber-300",
-  red: "bg-red-100 text-red-800 border-red-300",
-  grey: "bg-gray-100 text-gray-700 border-gray-300",
+  green: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  amber: "bg-amber-50 text-amber-800 border-amber-200",
+  red: "bg-red-50 text-red-800 border-red-200",
+  grey: "bg-gray-100 text-gray-700 border-gray-200",
 };
 
 export function statusBadgeClass(key: string): string {

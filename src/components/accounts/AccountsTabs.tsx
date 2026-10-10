@@ -23,8 +23,8 @@ export function AccountsTabs() {
               key={t.href}
               href={t.href}
               aria-current={active ? "page" : undefined}
-              className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${
-                active ? "border-brand text-brand" : "border-transparent text-gray-500 hover:text-foreground"
+              className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] transition-colors ${
+                active ? "border-brand font-semibold text-brand" : "border-transparent font-medium text-gray-500 hover:border-gray-300 hover:text-foreground"
               }`}
             >
               {t.label}

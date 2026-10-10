@@ -1,30 +1,170 @@
 @import "tailwindcss";
+@source "../";
 
-/* ThreadLine design tokens — one palette, consumed everywhere. Status colours
-   (green/amber/red/grey) are Tailwind's own scale, used consistently via
-   src/lib/tokens.ts; don't introduce a second colour system. */
+/* ThreadLine design tokens — one palette, consumed everywhere. The look is
+   the Stitch "industrial control" system (design/stitch/): deep navy primary,
+   cool mill-floor neutrals, IBM Plex Sans headings over Geist body text, and
+   near-square corners. Status colours (green/amber/red/grey) are Tailwind's
+   own scale, used consistently via src/lib/tokens.ts; don't introduce a
+   second colour system. */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --brand: #1d4ed8;
+  --background: #f2f4f6;
+  --foreground: #191c1e;
+  --surface: #ffffff;
+  --surface-low: #f7f9fb;
+  --surface-container: #eceef0;
+  --brand: #00288e;
+  --brand-container: #1e40af;
+  --brand-tint: #3755c3;
+  --brand-soft: #dde1ff;
   --brand-foreground: #ffffff;
-  --border: #e2e8f0;
+  --border: #e0e3e5;
+  --border-strong: #c4c5d5;
+  --muted: #444653;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-low: var(--surface-low);
+  --color-surface-container: var(--surface-container);
   --color-brand: var(--brand);
+  --color-brand-container: var(--brand-container);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-soft: var(--brand-soft);
   --color-brand-foreground: var(--brand-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-muted: var(--muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-plex-sans);
+}
+
+/* Modules were written against both `gray` and `slate`; both now resolve to
+   the same cool Stitch neutrals so every screen shares one grey. Radii are
+   pulled in to the near-square industrial look, shadows kept to hairlines. */
+@theme {
+  --color-gray-50: #f7f9fb;
+  --color-gray-100: #eceef0;
+  --color-gray-200: #e0e3e5;
+  --color-gray-300: #c4c5d5;
+  --color-gray-400: #8e909e;
+  --color-gray-500: #646676;
+  --color-gray-600: #444653;
+  --color-gray-700: #353843;
+  --color-gray-800: #262931;
+  --color-gray-900: #191c1e;
+  --color-gray-950: #0e1013;
+
+  --color-slate-50: #f7f9fb;
+  --color-slate-100: #eceef0;
+  --color-slate-200: #e0e3e5;
+  --color-slate-300: #c4c5d5;
+  --color-slate-400: #8e909e;
+  --color-slate-500: #646676;
+  --color-slate-600: #444653;
+  --color-slate-700: #353843;
+  --color-slate-800: #262931;
+  --color-slate-900: #191c1e;
+  --color-slate-950: #0e1013;
+
+  /* Quality and Dispatch were built on indigo — it is the brand navy now. */
+  --color-indigo-50: #eef0ff;
+  --color-indigo-100: #dde1ff;
+  --color-indigo-200: #b8c4ff;
+  --color-indigo-300: #8fa1ee;
+  --color-indigo-400: #5c76d6;
+  --color-indigo-500: #3755c3;
+  --color-indigo-600: #00288e;
+  --color-indigo-700: #1e40af;
+  --color-indigo-800: #001a66;
+  --color-indigo-900: #001453;
+  --color-indigo-950: #000c33;
+
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 5px;
+  --radius-2xl: 6px;
+  --radius-3xl: 8px;
+
+  --shadow-2xs: 0 1px 0 rgb(25 28 30 / 0.03);
+  --shadow-xs: 0 1px 1px rgb(25 28 30 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(25 28 30 / 0.06), 0 0 0 1px rgb(25 28 30 / 0.02);
+  --shadow: 0 1px 3px rgb(25 28 30 / 0.08), 0 1px 2px rgb(25 28 30 / 0.04);
+  --shadow-md: 0 4px 10px -2px rgb(25 28 30 / 0.08), 0 2px 4px -2px rgb(25 28 30 / 0.05);
+  --shadow-lg: 0 12px 24px -6px rgb(25 28 30 / 0.12), 0 4px 8px -4px rgb(25 28 30 / 0.06);
+  --shadow-xl: 0 24px 48px -12px rgb(25 28 30 / 0.22);
+
+  --animate-live-ping: live-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+  @keyframes live-ping {
+    75%,
+    100% {
+      transform: scale(2.2);
+      opacity: 0;
+    }
+  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-tint);
+  outline-offset: 1px;
+}
+
+/* Small uppercase tracked label — the Stitch "label-md" voice for card
+   titles, column headers and section eyebrows. */
+@utility label-caps {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@utility label-caps-sm {
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* Big telemetry numerals on KPI tiles. */
+@utility display-num {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin, quiet scrollbars for the sidebar and wide tables. */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 /* Module 3: when a QR roll label is printed, print only the label. */

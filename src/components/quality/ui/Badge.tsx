@@ -13,7 +13,7 @@ export function Badge({ status, variant, className, children, ...props }: BadgeP
     return (
       <span
         className={cn(
-          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border",
+          "inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm text-[11px] font-semibold tracking-wide border",
           style.bg,
           style.text,
           style.border,
@@ -38,7 +38,7 @@ export function Badge({ status, variant, className, children, ...props }: BadgeP
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border",
+        "inline-flex items-center px-1.5 py-0.5 rounded-sm text-[11px] font-semibold tracking-wide border",
         variants[variant || "neutral"],
         className
       )}

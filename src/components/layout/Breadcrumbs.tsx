@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChevronRight } from "lucide-react";
+import { navItemForPath } from "./nav-config";
 
 function titleCase(segment: string) {
   return segment
@@ -8,27 +10,34 @@ function titleCase(segment: string) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Record ids (cuids, uuids) read as "Details" rather than a wall of letters.
+function looksLikeId(segment: string) {
+  return segment.length >= 16 && /\d/.test(segment);
+}
+
 export function Breadcrumbs() {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
-
-  if (segments.length <= 1) return null;
+  const section = navItemForPath(pathname);
 
   const crumbs = segments.map((segment, i) => ({
-    label: titleCase(segment),
+    label: i === 0 && section ? section.short : looksLikeId(segment) ? "Details" : titleCase(segment),
     href: `/${segments.slice(0, i + 1).join("/")}`,
     isLast: i === segments.length - 1,
   }));
 
   return (
-    <nav className="flex items-center gap-1 text-sm text-gray-500">
+    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-gray-500">
+      <span className="hidden whitespace-nowrap sm:inline">Everest Mills</span>
       {crumbs.map((crumb, i) => (
-        <span key={crumb.href} className="flex items-center gap-1">
-          {i > 0 && <span className="text-gray-300">/</span>}
+        <span key={crumb.href} className="flex min-w-0 items-center gap-1.5">
+          <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-gray-300 ${i === 0 ? "hidden sm:block" : ""}`} aria-hidden="true" />
           {crumb.isLast ? (
-            <span className="font-medium text-foreground">{crumb.label}</span>
+            <span className="truncate font-semibold text-brand" aria-current="page">
+              {crumb.label}
+            </span>
           ) : (
-            <Link href={crumb.href} className="hover:text-foreground">
+            <Link href={crumb.href} className="truncate transition-colors hover:text-foreground">
               {crumb.label}
             </Link>
           )}

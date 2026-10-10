@@ -135,7 +135,7 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
         <button
           onClick={handleOpenQueue}
           title="Click to view offline sync queue"
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+          className={`flex items-center gap-1.5 whitespace-nowrap px-2 py-1 rounded-sm text-[11px] font-semibold border transition-all ${
             !isOnline
               ? "bg-rose-50 text-rose-700 border-rose-200"
               : isSyncing
@@ -171,24 +171,26 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
             </>
           ) : (
             <>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="w-2 h-2 bg-emerald-600" />
               <span>Online</span>
+              <span className="hidden font-medium text-emerald-700/70 xl:inline">• Synced</span>
             </>
           )}
         </button>
 
         {/* DB Backup & Restore Controls (owner only; the API enforces it too) */}
         {canBackup && (
-          <div className="hidden sm:flex items-center gap-1 border-l border-slate-200 pl-2">
+          <div className="hidden lg:flex items-center gap-0.5 border-l border-slate-200 pl-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={handleBackup}
               title="Export SQLite database"
+              aria-label="Backup DB"
               className="text-xs text-slate-600"
             >
-              <Download className="w-3.5 h-3.5 mr-1 text-slate-500" />
-              Backup DB
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden 2xl:inline">Backup DB</span>
             </Button>
 
             <label
@@ -196,7 +198,7 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
               title="Restore SQLite database from file"
             >
               <Upload className="w-3.5 h-3.5 text-slate-500" />
-              Restore
+              <span className="hidden 2xl:inline">Restore</span>
               <input
                 type="file"
                 accept=".db"

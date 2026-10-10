@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function useApi<T>(url: string) {
+/** A null url skips the request (for data the current user can't open). */
+export function useApi<T>(url: string | null) {
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(url !== null);
   const [error, setError] = useState<string | null>(null);
   // HTTP status of the last failed load (404 vs 403 vs 500), null otherwise.
   const [status, setStatus] = useState<number | null>(null);
@@ -18,6 +19,7 @@ export function useApi<T>(url: string) {
   }, []);
 
   useEffect(() => {
+    if (url === null) return;
     let cancelled = false;
 
     async function load() {
@@ -25,7 +27,7 @@ export function useApi<T>(url: string) {
       setError(null);
       setStatus(null);
       try {
-        const res = await fetch(url);
+        const res = await fetch(url!);
         if (!res.ok) {
           if (!cancelled) setStatus(res.status);
           throw new Error(`Request failed (${res.status})`);

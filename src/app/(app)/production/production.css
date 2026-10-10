@@ -1,52 +1,227 @@
 /* Module 2's semantic variables, mapped onto the foundation's palette
    (globals.css + Tailwind's status scale) so the production screens match the
-   rest of the app shell. */
+   rest of the app shell — the Stitch loom-shed look: white tiles on the cool
+   canvas, a status rail and square status pip, Plex numerals. */
 .production-page {
-  --content-wide: 80rem;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;
   --space-6: 1.5rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --font-size-lg: 1.125rem;
-  --font-size-2xl: 1.5rem;
-  --control-height: 2.5rem;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --control-height: 2.25rem;
   --color-text: var(--foreground);
   --color-border: var(--border);
   --color-surface: #ffffff;
-  --color-muted: #64748b;
+  --color-muted: #646676;
   --color-danger: #b91c1c;
   --color-action: var(--brand);
   --color-on-action: var(--brand-foreground);
-  --color-status-running: #16a34a;
-  --color-status-idle: #9ca3af;
+  --color-status-running: #059669;
+  --color-status-idle: #d97706;
   --color-status-breakdown: #dc2626;
-  --color-status-pending: #f59e0b;
+  --color-status-pending: #8e909e;
 }
 .production-page {
-  max-width: var(--content-wide);
-  margin-inline: auto;
   padding: 0;
   color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.45;
 }
-.production-page h1 { font-size: var(--font-size-2xl); margin-bottom: var(--space-2); }
-.production-page h2 { font-size: var(--font-size-lg); margin-bottom: var(--space-3); }
-.production-page p { margin-bottom: var(--space-3); }
-.production-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
-.production-panel { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.production-page h1 {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-bottom: var(--space-1);
+}
+.production-page h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+.production-page p { margin-bottom: var(--space-2); }
+.production-page > p.production-muted:first-of-type { margin-bottom: var(--space-4); }
+.production-page strong { font-weight: 600; }
+.production-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+}
+.production-panel {
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+.production-panel > :last-child { margin-bottom: 0; }
 .production-form { display: grid; gap: var(--space-3); max-width: 36rem; }
-.production-form label { display: grid; gap: var(--space-1); }
-.production-page input, .production-page select { min-height: var(--control-height); padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); }
-.production-form button, .production-action { min-height: var(--control-height); padding-inline: var(--space-4); border-radius: var(--radius-sm); background: var(--color-action); color: var(--color-on-action); }
+.production-form label {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #444653;
+}
+.production-page input,
+.production-page select {
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.production-page input:focus,
+.production-page select:focus {
+  outline: none;
+  border-color: var(--brand-tint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-tint) 20%, transparent);
+}
+.production-form button,
+.production-action {
+  min-height: var(--control-height);
+  padding-inline: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-action);
+  color: var(--color-on-action);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.15s;
+}
+.production-form button:hover,
+.production-action:hover { background: var(--brand-container); }
 .production-form button:disabled { opacity: .5; }
-.production-error { color: var(--color-danger); }
+.production-error {
+  color: var(--color-danger);
+  background: #fef2f2;
+  border-left: 4px solid var(--color-danger);
+  padding: var(--space-2) var(--space-3);
+}
+.production-error > button { margin-left: var(--space-2); }
 .production-muted { color: var(--color-muted); }
-.production-status { border-inline-start: var(--space-2) solid var(--color-status-pending); }
-.production-status[data-status="RUNNING"] { border-inline-start-color: var(--color-status-running); }
-.production-status[data-status="IDLE"] { border-inline-start-color: var(--color-status-idle); }
-.production-status[data-status="BREAKDOWN"], .production-status[data-status="MAINTENANCE"] { border-inline-start-color: var(--color-status-breakdown); }
-.production-progress { width: 100%; accent-color: var(--color-status-running); }
+
+/* Machine tile: a 3px status rail and a square pip, as on the Stitch shed grid. */
+.production-status {
+  position: relative;
+  border-left: 3px solid var(--color-status-pending);
+}
+.production-status::after {
+  content: "";
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 10px;
+  height: 10px;
+  background: var(--color-status-pending);
+}
+.production-status h2 {
+  font-size: 16px;
+  padding-right: var(--space-4);
+}
+.production-status p:first-of-type strong {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  padding: 2px 6px;
+  background: #eceef0;
+  color: #444653;
+}
+.production-status[data-status="RUNNING"] { border-left-color: var(--color-status-running); }
+.production-status[data-status="RUNNING"]::after { background: var(--color-status-running); }
+.production-status[data-status="RUNNING"] p:first-of-type strong { background: #ecfdf5; color: #065f46; }
+.production-status[data-status="IDLE"] { border-left-color: var(--color-status-idle); background: #fffbeb; }
+.production-status[data-status="IDLE"]::after { background: var(--color-status-idle); }
+.production-status[data-status="IDLE"] p:first-of-type strong { background: #fef3c7; color: #92400e; }
+.production-status[data-status="BREAKDOWN"],
+.production-status[data-status="MAINTENANCE"] { border-left-color: var(--color-status-breakdown); background: #fef2f2; }
+.production-status[data-status="BREAKDOWN"]::after,
+.production-status[data-status="MAINTENANCE"]::after { background: var(--color-status-breakdown); }
+.production-status[data-status="BREAKDOWN"] h2,
+.production-status[data-status="MAINTENANCE"] h2 { color: #b91c1c; }
+.production-status[data-status="BREAKDOWN"] p:first-of-type strong,
+.production-status[data-status="MAINTENANCE"] p:first-of-type strong { background: #fee2e2; color: #991b1b; }
+.production-status p:nth-of-type(2) strong {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Order progress: a flat brand bar instead of the browser's default meter. */
+.production-progress {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  background: #eceef0;
+  margin-block: var(--space-1) var(--space-2);
+}
+.production-progress::-webkit-progress-bar { background: #eceef0; }
+.production-progress::-webkit-progress-value { background: var(--brand); }
+.production-progress::-moz-progress-bar { background: var(--brand); }
+
 .production-list { display: grid; gap: var(--space-3); }
-.production-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-block: var(--space-4); }
+.production-list > article {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-low);
+  border-left: 2px solid var(--brand);
+}
+.production-list > article p { margin: 2px 0 0; color: var(--color-muted); font-size: 12px; }
+.production-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  margin-block: var(--space-3);
+}
+/* The floor board reuses the class for its two summary panels, as a grid. */
+.production-grid.production-actions { display: grid; align-items: stretch; margin-block: var(--space-4) 0; }
+
+/* Search / filter controls and the per-machine status picker: caps label
+   stacked over its control, as everywhere else. */
+.production-actions > label,
+.production-status > label {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #444653;
+}
+.production-status > label { margin-block: var(--space-2); max-width: 14rem; }
+
+/* Bare action buttons (Edit, Remove, Request maintenance, Retry) read as the
+   shared secondary button. */
+.production-actions > button,
+.production-error > button {
+  min-height: 1.75rem;
+  padding: 0.25rem 0.625rem;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-xs);
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.production-actions > button:hover { background: var(--surface-low); border-color: #8e909e; }
+/* "Request maintenance" — only rendered on a broken-down machine. */
+.production-status[data-status="BREAKDOWN"] .production-actions > button:nth-child(3) {
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+.production-status > strong { font-family: var(--font-display), var(--font-sans), sans-serif; font-size: 15px; }
+.production-status > strong + .production-muted { margin-left: var(--space-1); }
+.production-status > p:first-of-type { margin-top: var(--space-1); }
+/* Forms and lists sit at their own height beside a long machine list. */
+.production-grid > .production-panel:not(.production-status) { align-self: start; }

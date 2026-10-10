@@ -6,7 +6,7 @@ import { PageTitle } from "@/components/accounts/Stat";
 import { assistantQuerySchema } from "@/lib/validation/accounts";
 import type { AssistantAnswer } from "@/lib/assistant/engine";
 
-const SUGGESTIONS = [
+export const SUGGESTIONS = [
   "Which order made the least profit this month?",
   "What is the month-end summary for this month?",
   "Which machine has the highest reject rate?",
@@ -36,6 +36,19 @@ export function AssistantClient() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, busy]);
+
+  // A question handed over from the dashboard terminal (/assistant?q=…) is
+  // asked once on arrival, then dropped from the URL so a reload doesn't
+  // repeat it.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (!q) return;
+    const id = setTimeout(() => {
+      window.history.replaceState(null, "", window.location.pathname);
+      void ask(q);
+    }, 0);
+    return () => clearTimeout(id);
+  }, []);
 
   async function ask(text: string) {
     const parsed = assistantQuerySchema.safeParse({ question: text });

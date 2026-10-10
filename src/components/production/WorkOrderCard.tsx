@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Button, ConfirmButton } from "@/components/ui";
+import { Badge, Button, ConfirmButton } from "@/components/ui";
 import { dateTimeIN } from "@/lib/accounts/format";
 import { productionLogUpdateSchema, workOrderUpdateSchema } from "@/lib/validation/production";
 import { readApi, writeApi, type FieldErrors } from "./api";
@@ -50,8 +50,13 @@ export function WorkOrderCard({ workOrder, machines, onChanged }: { workOrder: W
   const sameStage = machines.filter((machine) => machine.type === machineTypeForStage[workOrder.stage]);
 
   return <article className="production-panel">
-    <strong>{workOrder.order.orderNo}</strong> · {workOrder.stage}
-    <p>{workOrder.machine.name} · {workOrder.status}</p>
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <strong className="font-display text-[15px]">{workOrder.order.orderNo}</strong> <span className="production-muted capitalize">· {workOrder.stage}</span>
+        <p className="production-muted">{workOrder.machine.name}</p>
+      </div>
+      <Badge status={workOrder.status} />
+    </div>
     <progress className="production-progress" value={workOrder.producedQty} max={workOrder.plannedQty} aria-label={`${workOrder.order.orderNo} ${workOrder.stage} progress`} />
     <p>{workOrder.producedQty} / {workOrder.plannedQty} m</p>
     {error && <p role="alert" className="production-error">{error}</p>}

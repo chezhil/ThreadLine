@@ -21,14 +21,14 @@ export function Table<T>({ columns, rows, keyFor, emptyState }: TableProps<T>) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border border-border">
+    <div className="scrollbar-thin overflow-x-auto rounded-md border border-border/80 bg-white shadow-sm">
       <table className="min-w-full divide-y divide-border text-sm">
-        <thead className="bg-gray-50">
+        <thead className="bg-surface-low">
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key ?? col.header}
-                className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap"
+                className="label-caps px-3 py-2.5 text-left text-gray-600 whitespace-nowrap"
               >
                 {col.header}
               </th>
@@ -37,9 +37,9 @@ export function Table<T>({ columns, rows, keyFor, emptyState }: TableProps<T>) {
         </thead>
         <tbody className="divide-y divide-border bg-white">
           {rows.map((row) => (
-            <tr key={keyFor(row)} className="hover:bg-gray-50">
+            <tr key={keyFor(row)} className="transition-colors hover:bg-brand-soft/30">
               {columns.map((col) => (
-                <td key={col.key ?? col.header} className={`px-3 py-2 whitespace-nowrap ${col.className ?? ""}`}>
+                <td key={col.key ?? col.header} className={`px-3 py-2.5 whitespace-nowrap tabular-nums text-gray-800 ${col.className ?? ""}`}>
                   {col.render(row)}
                 </td>
               ))}

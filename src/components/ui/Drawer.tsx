@@ -42,7 +42,7 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
       <button
         aria-label="Close"
         tabIndex={-1}
-        className="absolute inset-0 bg-black/30"
+        className="absolute inset-0 bg-gray-950/40 backdrop-blur-[2px]"
         onClick={onClose}
       />
       <div
@@ -51,15 +51,18 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative flex h-full w-full max-w-md flex-col bg-white shadow-xl outline-none"
+        className="relative flex h-full w-full max-w-md flex-col border-l border-border bg-white shadow-xl outline-none"
       >
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 id={titleId} className="text-base font-semibold text-foreground">{title}</h2>
+        <div className="flex items-center justify-between border-b border-border bg-surface-low px-4 py-3">
+          <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <span className="h-3 w-3 bg-brand" aria-hidden="true" />
+            {title}
+          </h2>
           <button
             type="button"
             data-drawer-close
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100"
+            className="rounded-md px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-surface-container hover:text-foreground"
           >
             Close
           </button>

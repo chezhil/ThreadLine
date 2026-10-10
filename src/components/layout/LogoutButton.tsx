@@ -1,8 +1,9 @@
 "use client";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { disconnectRealtime } from "@/lib/useRealtime";
 
-export function LogoutButton({ className }: { className?: string }) {
+export function LogoutButton({ className, children }: { className?: string; children?: ReactNode }) {
   const router = useRouter();
   return (
     <button
@@ -25,7 +26,7 @@ export function LogoutButton({ className }: { className?: string }) {
         "w-full rounded-md border border-border px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
       }
     >
-      Sign out
+      {children ?? "Sign out"}
     </button>
   );
 }

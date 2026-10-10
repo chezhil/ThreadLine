@@ -4,8 +4,8 @@
   "description": "Textile Mill Management System - Offline-Ready & Realtime",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#1d4ed8",
+  "background_color": "#f2f4f6",
+  "theme_color": "#00288e",
   "icons": [
     {
       "src": "/icon.svg",
