@@ -114,15 +114,37 @@ check("floor board shows today's metres", board?.todayMetres >= 60, board);
 const audit = (await owner("GET", `/api/audit?entity=ProductionLog`)).json;
 check("audit trail has the production log", (audit?.entries ?? audit?.logs ?? audit?.rows ?? []).length > 0, Object.keys(audit ?? {}));
 
+// --- M2: spinning done ≠ production done -------------------------------------
+const capped = await floor("POST", "/api/production-logs", { workOrderId: wo.json.id, shift: "Morning (Shift A)", qtyProduced: idleSpinner.capacityMetresPerShift });
+check("log beyond the machine's per-shift capacity → 400 on qtyProduced", capped.status === 400 && /per shift/.test(capped.json?.fieldErrors?.qtyProduced?.[0] ?? ""), capped.json);
+const finishSpin = await floor("POST", "/api/production-logs", { workOrderId: wo.json.id, shift: "Evening (Shift B)", qtyProduced: 40 });
+check("spinning work order completed", finishSpin.status === 201 && finishSpin.json?.completed === true, finishSpin.json);
+after = (await owner("GET", `/api/orders/${confirmed.id}`)).json;
+check("order still IN_PRODUCTION after only spinning finished (not QC)", (after?.order ?? after)?.status === "IN_PRODUCTION" && (after?.order ?? after)?.productionStatus === "IN_PRODUCTION", after?.order ?? after);
+const idleLoom = (await floor("GET", "/api/machines")).json.machines.find((m) => m.type === "loom" && m.status === "IDLE" && !m.currentWorkOrder);
+const weaveWo = await floor("POST", "/api/work-orders", { orderId: confirmed.id, stage: "weaving", machineId: idleLoom.id, plannedQty: 100 });
+check("weaving work order can follow spinning", weaveWo.status === 201, weaveWo.json);
+const onBroken = await floor("POST", "/api/work-orders", { orderId: confirmed.id, stage: "dyeing", machineId: machine("Dyeing 2").id, plannedQty: 100 });
+check("work order on a machine under maintenance → 400 on machineId", onBroken.status === 400 && /maintenance/.test(onBroken.json?.fieldErrors?.machineId?.[0] ?? ""), onBroken.json);
+
 // --- M3: mint a roll, inspect it ----------------------------------------------
 const inProd = orderList.find((o) => o.orderNo === byNo("EVR-2610-004")?.orderNo);
-const wos = (await owner("GET", "/api/work-orders")).json.workOrders;
-const weaving = wos.find((w) => w.order.orderNo === "EVR-2610-004" && w.stage === "weaving");
-const anyLot = lotList[0];
-const mismatch = await floor("POST", "/api/rolls", { orderId: confirmed.id, workOrderId: weaving.id, machineId: machine("Loom 1").id, shift: "Morning (Shift A)", yarnLotId: anyLot.id, lengthMetres: 100, weightKg: 20 });
+const mintOptions = (await qc("GET", "/api/rolls/mint-options")).json?.workOrders ?? [];
+const weaving = mintOptions.find((w) => w.order.orderNo === "EVR-2610-004");
+check("mint options list EVR-2610-004's weaving work order with its reserved yarn", !!weaving && weaving.yarnLots.length > 0, mintOptions.map((w) => w.order.orderNo));
+const otherLot = lotList.find((l) => !weaving.yarnLots.some((x) => x.id === l.id) && l.linkedOrderId !== inProd.id);
+const mismatch = await floor("POST", "/api/rolls", { orderId: confirmed.id, workOrderId: weaving.id, machineId: weaving.machine.id, shift: "Morning (Shift A)", yarnLotId: weaving.yarnLots[0].id, lengthMetres: 100, weightKg: 20 });
 check("roll with another order's work order → 400 on workOrderId", mismatch.status === 400 && !!mismatch.json?.fieldErrors?.workOrderId, mismatch.json);
-const roll = await floor("POST", "/api/rolls", { orderId: inProd.id, workOrderId: weaving.id, machineId: machine("Loom 1").id, shift: "Morning (Shift A)", yarnLotId: anyLot.id, lengthMetres: 98.5, weightKg: 21.2 });
+const wrongLoom = await floor("POST", "/api/rolls", { orderId: inProd.id, workOrderId: weaving.id, machineId: idleLoom.id === weaving.machine.id ? machine("Loom 1").id : idleLoom.id, shift: "Morning (Shift A)", yarnLotId: weaving.yarnLots[0].id, lengthMetres: 100, weightKg: 20 });
+check("roll on a different loom than its work order → 400 on machineId", wrongLoom.status === 400 && !!wrongLoom.json?.fieldErrors?.machineId, wrongLoom.json);
+if (otherLot) {
+  const wrongLot = await floor("POST", "/api/rolls", { orderId: inProd.id, workOrderId: weaving.id, machineId: weaving.machine.id, shift: "Morning (Shift A)", yarnLotId: otherLot.id, lengthMetres: 100, weightKg: 20 });
+  check("roll from yarn not reserved for the order → 400 on yarnLotId", wrongLot.status === 400 && !!wrongLot.json?.fieldErrors?.yarnLotId, wrongLot.json);
+}
+const roll = await floor("POST", "/api/rolls", { orderId: inProd.id, workOrderId: weaving.id, machineId: weaving.machine.id, shift: "Morning (Shift A)", yarnLotId: weaving.yarnLots[0].id, lengthMetres: 98.5, weightKg: 21.2, qcStatus: "PASS" });
 check("floor supervisor mints a roll", roll.status === 201 && /^ROL-/.test(roll.json?.rollNo), roll.json);
+check("a new roll is PENDING even if the client says PASS", roll.json?.qcStatus === "PENDING", roll.json?.qcStatus);
+check("roll reads hide the order price from the floor/QC roles", roll.json?.order?.pricePerMetre === undefined && (await qc("GET", "/api/rolls")).json.every((r) => r.order?.pricePerMetre === undefined && r.order?.buyer?.contact === undefined));
 const byQr = await qc("GET", `/api/rolls/by-qr/${roll.json.qrToken}`);
 check("QR token resolves to the roll", byQr.json?.id === roll.json.id);
 const noDefect = await qc("POST", `/api/rolls/${roll.json.id}/qc`, { result: "REJECT", defects: [] });
@@ -132,6 +154,15 @@ check("QC pass saved", spoofed.status === 200, spoofed.json);
 check("QC record uses the signed-in inspector, not the client's id", spoofed.json?.qcRecord?.inspectorId !== "someone-else");
 const detail = (await qc("GET", `/api/rolls/${roll.json.id}`)).json;
 check("roll detail names the inspector", detail?.qcRecords?.[0]?.inspectorName === "qc", detail?.qcRecords?.[0]);
+check("roll reads don't expose user ids", detail?.qcRecords?.every((q) => q.inspectorId === undefined));
+const replay = await qc("POST", `/api/rolls/${roll.json.id}/qc`, { result: "PASS", defects: [], clientMutationId: "verify-int-qc-1" });
+const replay2 = await qc("POST", `/api/rolls/${roll.json.id}/qc`, { result: "PASS", defects: [], clientMutationId: "verify-int-qc-1" });
+check("replayed offline inspection is saved once", replay.status === 200 && replay2.json?.qcRecord?.id === "verify-int-qc-1" && (await qc("GET", `/api/rolls/${roll.json.id}`)).json.qcRecords.length === 2);
+const otherRoll = (await qc("GET", "/api/rolls?qcStatus=PENDING")).json.find((r) => r.id !== roll.json.id);
+const stolenId = await qc("POST", `/api/rolls/${otherRoll.id}/qc`, { result: "PASS", defects: [], clientMutationId: "verify-int-qc-1" });
+check("an inspection id from another roll → 409, not a fake success", stolenId.status === 409, stolenId.json);
+const badDefect = await qc("POST", `/api/rolls/${roll.json.id}/qc`, { result: "REWORK", defects: ["made_up"] });
+check("unknown defect type → 400", badDefect.status === 400, badDefect.json);
 
 // --- M3 → M1/M4: dispatch the READY order ------------------------------------
 const ready = orderList.find((o) => o.status === "READY");
@@ -159,10 +190,13 @@ const truck2 = await store("POST", "/api/dispatches", { buyerId: ready.buyerId, 
 check("re-inspected rolls ship on a second truck", truck2.status === 201 && truck2.json?.invoiceId === truck1.json.invoiceId, truck2.json);
 after = (await owner("GET", `/api/orders/${ready.id}`)).json;
 check("order → DISPATCHED once every non-rejected roll shipped", (after?.order ?? after)?.status === "DISPATCHED", (after?.order ?? after)?.status);
+const orderAudit = (await owner("GET", `/api/audit?entity=Order`)).json;
+const orderAuditRows = orderAudit?.entries ?? orderAudit?.logs ?? orderAudit?.rows ?? [];
+check("the READY → DISPATCHED change is in the audit trail", orderAuditRows.some((r) => r.entityId === ready.id && /DISPATCHED/.test(JSON.stringify(r.after ?? r.newValue ?? r))), orderAuditRows.slice(0, 2));
 
 // --- M4 sees it ----------------------------------------------------------------
 const cost = (await owner("GET", `/api/analytics/cost-per-order?orderId=${ready.id}`)).json;
-check("costing: dispatched order is now final (invoiced)", cost?.order?.stage === "final", cost?.order?.stage);
+check("costing: fully dispatched order is now final", cost?.order?.stage === "final", cost?.order?.stage);
 check("costing: roll costs cover every roll", cost?.rolls?.length === readyRolls.length, [cost?.rolls?.length, readyRolls.length]);
 const audits = (await owner("GET", `/api/audit?entity=Dispatch`)).json;
 check("audit trail has both dispatches", (audits?.entries ?? audits?.logs ?? audits?.rows ?? []).length >= 2);

@@ -98,6 +98,12 @@ async function main() {
     });
     await db.payment.create({ data: { invoiceId: inv.id, amount: 50000, mode: "neft", receivedAt: ist("2026-09-25T12:00:00") } });
 
+    // B is still in production but already invoiced (an invoice can be
+    // raised before anything ships): that must not make it "final".
+    await db.invoice.create({
+      data: { invoiceNo: "T-INV-2", orderId: B.id, buyerId: buyer.id, subtotal: 60000, gst: 3000, total: 63000, status: "ISSUED", createdAt: ist("2026-09-21T12:00:00") },
+    });
+
     const { orders, pools } = await computeCosting(db);
     const a = orders.find((o) => o.orderNo === "T-A")!;
     const b = orders.find((o) => o.orderNo === "T-B")!;
@@ -130,7 +136,7 @@ async function main() {
     eq("B overhead", b.costs.overhead, 875);
     eq("B indirect labour", b.costs.indirectLabour, 500);
     eq("B total cost", b.totalCost, 16018.33);
-    eq("B stage", b.stage, "in_progress");
+    eq("B stage (invoiced, still in production)", b.stage, "in_progress");
 
     eq("labour fully allocated (direct + spread = earned)", a.costs.directWages + b.costs.directWages + a.costs.indirectLabour + b.costs.indirectLabour, 800 + 300 + 500 + 700);
 
@@ -143,7 +149,7 @@ async function main() {
     eq("Sep wages earned", sep.wages.accrued, 2300);
     eq("Sep payments", sep.cash.paymentsReceived, 50000);
     eq("Sep expenses total", sep.cash.expensesTotal, 3000 + 1500 + 600 + 9999 + 1111 + 250);
-    eq("receivables", sep.receivables.outstanding, 55000);
+    eq("receivables (A 55,000 + unpaid B invoice 63,000)", sep.receivables.outstanding, 118000);
     const oct = await monthSummary("2026-10", db);
     eq("Oct net profit = −unabsorbed", oct.pnl.netProfit, -999);
 

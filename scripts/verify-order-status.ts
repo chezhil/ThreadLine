@@ -202,13 +202,50 @@ async function main() {
   });
   check("second dispatch (remaining roll) succeeds", secondDispatch.status === 201, secondDispatch);
 
-  const afterFull = await db.order.findUniqueOrThrow({ where: { id: testOrder.id } });
+  const afterShipped = await db.order.findUniqueOrThrow({ where: { id: testOrder.id } });
   check(
-    "dispatchStatus becomes FULLY_DISPATCHED once every PASS roll has shipped (the REJECT roll doesn't block it)",
+    "every roll so far has shipped, but production is still running: PARTIALLY_DISPATCHED, not DISPATCHED",
+    afterShipped.dispatchStatus === "PARTIALLY_DISPATCHED" && afterShipped.status === "IN_PRODUCTION",
+    { dispatchStatus: afterShipped.dispatchStatus, status: afterShipped.status },
+  );
+
+  // Finish production through the real events: spinning, then weaving, then
+  // dyeing. Completing spinning alone must not finish the order.
+  const logOutput = (workOrderId: string, qtyProduced: number) =>
+    owner("POST", "/api/production-logs", { workOrderId, shift: "Morning (Shift A)", qtyProduced });
+  const spun = await logOutput(workOrder.id, 10);
+  check("spinning work order completes", spun.status === 201 && (spun.json as { completed?: boolean })?.completed === true, spun);
+  const afterSpinning = await db.order.findUniqueOrThrow({ where: { id: testOrder.id } });
+  check("spinning done is not production done", afterSpinning.productionStatus === "IN_PRODUCTION" && afterSpinning.status === "IN_PRODUCTION", {
+    productionStatus: afterSpinning.productionStatus,
+    status: afterSpinning.status,
+  });
+  for (const [stage, type] of [["weaving", "loom"], ["dyeing", "dyeing"]] as const) {
+    const m = await db.machine.create({
+      data: { name: `Status-Test-${stage}-${Date.now()}`, type, status: "RUNNING", capacityMetresPerShift: 500 },
+    });
+    const wo = await owner("POST", "/api/work-orders", { orderId: testOrder.id, machineId: m.id, stage, plannedQty: 10 });
+    check(`${stage} work order can be created after the previous stage`, wo.status === 201, wo);
+    const done = await logOutput(as<{ id: string }>(wo.json).id, 10);
+    check(`${stage} work order completes`, done.status === 201, done);
+  }
+
+  const afterFull = await db.order.findUniqueOrThrow({ where: { id: testOrder.id } });
+  check("productionStatus is DONE once dyeing (the last stage) completes", afterFull.productionStatus === "DONE", {
+    productionStatus: afterFull.productionStatus,
+  });
+  check(
+    "dispatchStatus becomes FULLY_DISPATCHED once production is done and every PASS roll has shipped (the REJECT roll doesn't block it)",
     afterFull.dispatchStatus === "FULLY_DISPATCHED",
     { dispatchStatus: afterFull.dispatchStatus },
   );
   check("legacy status becomes DISPATCHED only now", afterFull.status === "DISPATCHED", { status: afterFull.status });
+  const statusAudit = await db.auditLog.findMany({ where: { entity: "Order", entityId: testOrder.id, action: "status_change" } });
+  check(
+    "the IN_PRODUCTION → DISPATCHED change is audited",
+    statusAudit.some((a) => /DISPATCHED/.test(a.newValue ?? "")),
+    statusAudit.map((a) => a.newValue),
+  );
 
   // D. Now that it's DISPATCHED, closing it should work.
   console.log("\n--- D. Closing a fully-dispatched order ---");

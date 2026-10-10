@@ -41,16 +41,24 @@ for (const page of pages) {
   await response.arrayBuffer();
 }
 
-const socket = io(BASE, { path: "/api/socketio", forceNew: true, timeout: 5000 });
-try {
-  await new Promise((resolve, reject) => {
-    socket.once("connect", resolve);
-    socket.once("connect_error", reject);
-  });
-  console.log("PASS  Socket.IO connection");
-} catch (error) {
-  console.error("FAIL  Socket.IO connection", error);
-  process.exitCode = 1;
-} finally {
-  socket.disconnect();
+async function connects(extraHeaders) {
+  const socket = io(BASE, { path: "/api/socketio", forceNew: true, timeout: 5000, reconnection: false, extraHeaders, transports: ["websocket"] });
+  try {
+    await new Promise((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("connect_error", reject);
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    socket.disconnect();
+  }
 }
+
+const signedIn = await connects({ cookie });
+console.log(`${signedIn ? "PASS" : "FAIL"}  Socket.IO connection with a session`);
+if (!signedIn) process.exitCode = 1;
+const anonymous = await connects({});
+console.log(`${!anonymous ? "PASS" : "FAIL"}  Socket.IO refuses a connection without a session`);
+if (anonymous) process.exitCode = 1;

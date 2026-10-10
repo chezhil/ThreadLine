@@ -147,6 +147,8 @@ async function main() {
     ).json,
   ).order;
 
+  // Invoices are only raised for confirmed orders.
+  await owner("PATCH", `/api/orders/${invoiceOrder.id}`, { status: "CONFIRMED" });
   const invoiceResults = await Promise.all(
     Array.from({ length: 8 }, () => owner("POST", "/api/invoices", { orderId: invoiceOrder.id })),
   );
