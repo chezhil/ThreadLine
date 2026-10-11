@@ -6,7 +6,7 @@ import type { Role } from "@/lib/auth";
 import { RealtimeEvents } from "@/lib/realtime";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { statusBadgeClass } from "@/lib/tokens";
-import { severityStatus } from "@/lib/accounts/alert-format";
+import { roleSeesAlert, severityStatus } from "@/lib/accounts/alert-format";
 import dynamic from "next/dynamic";
 import { useShell } from "./ShellProvider";
 import { goTargets, isTypingTarget } from "./shortcuts";
@@ -26,7 +26,7 @@ export function ShellOverlays({ role }: { role: Role }) {
       <GlobalKeys role={role} />
       {paletteOpen && <CommandPalette role={role} />}
       <ShortcutsDialog role={role} />
-      <ToastHost />
+      <ToastHost role={role} />
     </>
   );
 }
@@ -154,7 +154,7 @@ interface Toast {
   severity: string;
 }
 
-function ToastHost() {
+function ToastHost({ role }: { role: Role }) {
   const { prefs } = useShell();
   const router = useRouter();
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -167,8 +167,10 @@ function ToastHost() {
     setToasts((all) => all.filter((x) => x.id !== id));
   }, []);
 
-  useRealtimeEvent<{ id?: string; message?: string; severity?: string }>(RealtimeEvents.NotificationNew, (n) => {
+  useRealtimeEvent<{ id?: string; type?: string; message?: string; severity?: string }>(RealtimeEvents.NotificationNew, (n) => {
     if (!n?.message) return;
+    // Same audience rule as the bell: no toast (or beep) for alerts this role isn't shown.
+    if (!roleSeesAlert(role, { type: n.type ?? "", message: n.message })) return;
     if (prefs.alertSound) beep();
     if (!prefs.toastNewAlerts) return;
     const id = n.id ?? `${Date.now()}`;

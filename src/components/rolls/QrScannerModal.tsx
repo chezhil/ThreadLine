@@ -141,11 +141,25 @@ export function QrScannerModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mode]);
 
+  // Escape closes it, like every other dialog in the app (the camera stops via the effect above).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCloseRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+      <div role="dialog" aria-modal="true" aria-label={title} className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -157,9 +171,11 @@ export function QrScannerModal({
               stopCamera();
               onClose();
             }}
+            type="button"
+            aria-label="Close"
             className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 

@@ -1,4 +1,6 @@
 // Client-safe helpers for showing notifications. No DB imports here.
+import type { Prisma } from "@prisma/client";
+import type { Role } from "@/lib/auth";
 
 export interface NotificationRow {
   id: string;
@@ -52,4 +54,43 @@ export function formatAlertTime(iso: string): string {
 export function whatsappPreviewText(n: NotificationRow): string {
   const icon = n.severity === "critical" ? "🔴" : n.severity === "warning" ? "🟠" : "🔵";
   return `${icon} *Everest Textile Mills — ${alertKindLabel(n.type)}*\n${n.message}\n_${formatAlertTime(n.createdAt)} · ThreadLine_`;
+}
+
+// ---------------------------------------------------------------- audience --
+
+/** Which alerts each role is shown (the owner sees every alert). A role only
+ * gets what it can act on — a QC inspector has no use for payment receipts —
+ * so its bell counts real work, not the whole mill's feed. Shared by the
+ * alerts API (server filter) and the live toasts (client filter). */
+const ROLE_ALERT_KINDS: Record<Exclude<Role, "owner">, { kinds: string[]; decisions?: "purchase" | "maintenance" }> = {
+  storekeeper: { kinds: ["low_stock", "production_reorder", "order_ready"], decisions: "purchase" },
+  floor_supervisor: { kinds: ["production_delay", "machine_breakdown", "production_reorder"], decisions: "maintenance" },
+  qc_inspector: { kinds: ["machine_breakdown", "order_ready"] },
+};
+
+// Approval decisions are typed `approval_decided:<purchase|maintenance>`;
+// older rows are plain `approval_decided` and are told apart by their text.
+const DECISION_TEXT = { purchase: "Purchase request", maintenance: "Maintenance request" } as const;
+
+export function roleSeesAlert(role: Role, n: { type: string; message: string }): boolean {
+  if (role === "owner") return true;
+  const scope = ROLE_ALERT_KINDS[role];
+  if (scope.kinds.includes(alertKind(n.type))) return true;
+  const d = scope.decisions;
+  return !!d && (n.type.startsWith(`approval_decided:${d}`) || (n.type === "approval_decided" && n.message.startsWith(DECISION_TEXT[d])));
+}
+
+/** The same rule as a Prisma filter; `{}` (no restriction) for the owner. */
+export function alertScopeForRole(role: Role): Prisma.NotificationWhereInput {
+  if (role === "owner") return {};
+  const scope = ROLE_ALERT_KINDS[role];
+  const d = scope.decisions;
+  return {
+    OR: [
+      ...scope.kinds.flatMap((k) => [{ type: k }, { type: { startsWith: `${k}:` } }]),
+      ...(d
+        ? [{ type: { startsWith: `approval_decided:${d}` } }, { type: "approval_decided", message: { startsWith: DECISION_TEXT[d] } }]
+        : []),
+    ],
+  };
 }

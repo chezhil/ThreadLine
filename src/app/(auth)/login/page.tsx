@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, Factory, Landmark, Truck } from "lucide-react";
+import { ClipboardCheck, Eye, EyeOff, Factory, Landmark, Truck } from "lucide-react";
 import { Button, Input } from "@/components/ui";
 import { BrandMark } from "@/components/layout/BrandMark";
 
@@ -18,6 +18,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,14 +31,16 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, password }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        const firstError = Object.values(data.fieldErrors ?? {})[0] as string[] | undefined;
-        setError(firstError?.[0] ?? "Login failed");
+        const firstError = Object.values(data?.fieldErrors ?? {})[0] as string[] | undefined;
+        setError(firstError?.[0] ?? "Sign-in failed. Please try again.");
         return;
       }
-      router.push(data.redirectTo ?? "/dashboard");
+      router.push(data?.redirectTo ?? "/dashboard");
       router.refresh();
+    } catch {
+      setError("Couldn't reach the server. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -108,15 +112,44 @@ export default function LoginPage() {
                 autoComplete="username"
                 required
               />
-              <Input
-                label="Password"
-                name="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
+              <div className="relative">
+                <Input
+                  label="Password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="pr-16"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  aria-pressed={showPassword}
+                  aria-controls="password"
+                  className="absolute bottom-1.5 right-1.5 inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-semibold text-gray-500 transition-colors hover:bg-surface-container hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              <div className="-mt-2 flex flex-col items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowForgot((s) => !s)}
+                  aria-expanded={showForgot}
+                  aria-controls="forgot-password-note"
+                  className="text-xs font-semibold text-brand hover:underline"
+                >
+                  Forgot password?
+                </button>
+                {showForgot && (
+                  <p id="forgot-password-note" role="status" className="w-full border-l-4 border-brand-tint bg-surface-low px-3 py-2 text-[13px] text-gray-700">
+                    Passwords are reset by your mill administrator. Please contact them to get a new one.
+                  </p>
+                )}
+              </div>
               {error && (
                 <p role="alert" className="border-l-4 border-red-600 bg-red-50 px-3 py-2 text-[13px] text-red-800">
                   {error}

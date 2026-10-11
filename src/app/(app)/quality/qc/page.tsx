@@ -35,7 +35,7 @@ import type { RollRow } from "@/lib/quality/types";
 // open, so keep them out of this page's initial bundle.
 const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
 // The label pulls in the qrcode encoder; it's only shown in the print modal.
-const RollQrLabel = dynamic(() => import("@/components/rolls/RollQrLabel").then((m) => m.RollQrLabel), { ssr: false });
+const RollLabelModal = dynamic(() => import("@/components/rolls/RollLabelModal").then((m) => m.RollLabelModal), { ssr: false });
 
 const PAGE_SIZE = 50;
 type StatusCounts = Partial<Record<"PENDING" | "PASS" | "REWORK" | "REJECT", number>>;
@@ -688,22 +688,7 @@ export default function QcQueuePage() {
       </Drawer>
 
       {/* QR Label Print Modal */}
-      {isLabelModalOpen && selectedRoll && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-slate-900 text-base">Print Roll Label</h3>
-              <button
-                onClick={() => setIsLabelModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                ✕
-              </button>
-            </div>
-            <RollQrLabel roll={selectedRoll} />
-          </div>
-        </div>
-      )}
+      {isLabelModalOpen && selectedRoll && <RollLabelModal roll={selectedRoll} onClose={() => setIsLabelModalOpen(false)} />}
 
       {/* Camera QR Scanner Modal — mounted only once opened, so its chunk isn't fetched on page load */}
       {scannerOpen && (

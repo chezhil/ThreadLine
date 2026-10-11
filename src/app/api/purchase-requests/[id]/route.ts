@@ -39,7 +39,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   await logAudit("PurchaseRequest", id, "status_change", { status: "PENDING" }, { status: updated.status }, user.id);
   await notify(
-    "approval_decided",
+    "approval_decided:purchase",
     `Purchase request for ${updated.qtyKg} kg of ${existing.yarnType.name} (${existing.yarnType.colour}) was ${approvalVerb(status)}.`,
     "info",
   );

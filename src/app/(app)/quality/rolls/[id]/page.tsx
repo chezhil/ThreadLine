@@ -21,7 +21,7 @@ import dynamic from "next/dynamic";
 import type { QcRecord, RollRow } from "@/lib/quality/types";
 
 // The label pulls in the qrcode encoder; it's only shown in the print modal.
-const RollQrLabel = dynamic(() => import("@/components/rolls/RollQrLabel").then((m) => m.RollQrLabel), { ssr: false });
+const RollLabelModal = dynamic(() => import("@/components/rolls/RollLabelModal").then((m) => m.RollLabelModal), { ssr: false });
 
 export default function RollDetailPage() {
   const params = useParams();
@@ -344,22 +344,7 @@ export default function RollDetailPage() {
       </Card>
 
       {/* Label Modal */}
-      {showPrintModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-slate-900 text-base">Print Roll Label</h3>
-              <button
-                onClick={() => setShowPrintModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                ✕
-              </button>
-            </div>
-            <RollQrLabel roll={roll} />
-          </div>
-        </div>
-      )}
+      {showPrintModal && <RollLabelModal roll={roll} onClose={() => setShowPrintModal(false)} />}
 
       <Drawer isOpen={editing} onClose={() => setEditing(false)} title={`Edit ${roll.rollNo}`}>
         <EditRollForm

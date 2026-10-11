@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { syncDerivedAlerts } from "@/lib/accounts/alerts";
 import { fieldErrorResponse, readJson, zodFieldErrors } from "@/lib/accounts/http";
 import { alertsUpdateSchema } from "@/lib/validation/accounts";
+import { alertScopeForRole } from "@/lib/accounts/alert-format";
 
 const SEVERITIES = ["info", "warning", "critical"];
 
@@ -25,8 +26,11 @@ export async function GET(req: NextRequest) {
 
   // "Unread" is per user: open (not resolved) and not yet marked read by
   // this user. Marking alerts read no longer hides them for anyone else.
-  const unreadForUser = { read: false, reads: { none: { userId: user.id } } };
+  // Each role only sees (and counts) the alerts it can act on.
+  const scope = alertScopeForRole(user.role);
+  const unreadForUser = { ...scope, read: false, reads: { none: { userId: user.id } } };
   const where = {
+    ...scope,
     ...(sp.get("unread") === "1" ? unreadForUser : {}),
     ...(severity ? { severity } : {}),
   };
@@ -59,6 +63,7 @@ export async function PATCH(req: NextRequest) {
   const updated = await writeTransaction(async (tx) => {
     const targets = await tx.notification.findMany({
       where: {
+        ...alertScopeForRole(user.role),
         ...(all ? {} : { id: { in: ids } }),
         reads: read ? { none: { userId: user.id } } : { some: { userId: user.id } },
       },
@@ -73,6 +78,6 @@ export async function PATCH(req: NextRequest) {
     }
     return (await tx.notificationRead.deleteMany({ where: { userId: user.id, notificationId: { in: targetIds } } })).count;
   });
-  const unreadCount = await db.notification.count({ where: { read: false, reads: { none: { userId: user.id } } } });
+  const unreadCount = await db.notification.count({ where: { ...alertScopeForRole(user.role), read: false, reads: { none: { userId: user.id } } } });
   return NextResponse.json({ updated, unreadCount });
 }

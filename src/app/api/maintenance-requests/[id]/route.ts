@@ -51,6 +51,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     { status: updated.status, cost: updated.cost },
     user.id,
   );
-  await notify("approval_decided", `Maintenance request for ${existing.machine.name} was ${approvalVerb(status)}.`, "info");
+  await notify("approval_decided:maintenance", `Maintenance request for ${existing.machine.name} was ${approvalVerb(status)}.`, "info");
   return NextResponse.json({ request: updated });
 }
