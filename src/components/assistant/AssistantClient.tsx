@@ -167,7 +167,6 @@ function AnswerBubble({ result }: { result: AssistantAnswer }) {
           </button>
         )}
       </div>
-      {result.notice && <p className="mt-1 text-xs text-amber-700">{result.notice}</p>}
       {showData && (
         <pre className="mt-2 max-h-72 overflow-auto rounded bg-white p-2 text-xs text-gray-700">{JSON.stringify(result.data, null, 2)}</pre>
       )}

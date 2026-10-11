@@ -101,7 +101,7 @@ export function WorkOrdersClient() {
         <label>Search <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Order or machine" /></label>
         <label>Filter status <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">All statuses</option><option value="PLANNED">Planned</option><option value="IN_PROGRESS">In progress</option><option value="COMPLETED">Completed</option></select></label>
       </div>
-      {!data && !error && <p>Loading work orders…</p>}
+      {!data && !error && <p className="production-loading" role="status">Loading work orders…</p>}
       {data?.workOrders.length === 0 && <p>No work orders yet.</p>}
       {data && data.workOrders.length > 0 && visibleWorkOrders.length === 0 && <p>No work orders match these filters.</p>}
       <div className="production-grid">{pagedWorkOrders.map((workOrder) => <WorkOrderCard key={workOrder.id} workOrder={workOrder} machines={data?.machines ?? []} onChanged={refresh} />)}</div>

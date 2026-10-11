@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
 import { Button } from "@/components/quality/ui/Button";
@@ -11,7 +12,6 @@ import { Select } from "@/components/quality/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/quality/ui/Table";
 import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { Drawer } from "@/components/quality/ui/Drawer";
-import { QrScannerModal } from "@/components/rolls/QrScannerModal";
 import { RollQrLabel } from "@/components/rolls/RollQrLabel";
 import { enqueueOfflineMutation, newMutationId } from "@/lib/offline-queue";
 import { DEFECT_TYPES } from "@/lib/validation/roll";
@@ -29,6 +29,10 @@ import {
   CheckSquare,
 } from "lucide-react";
 import Link from "next/link";
+
+// The QR decoder (jsqr) and camera wiring only matter once the scan sheet is
+// open, so keep them out of this page's initial bundle.
+const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
 
 export default function QcQueuePage() {
   const [rolls, setRolls] = useState<any[]>([]);
@@ -681,12 +685,14 @@ export default function QcQueuePage() {
         </div>
       )}
 
-      {/* Camera QR Scanner Modal */}
-      <QrScannerModal
-        isOpen={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        onScan={handleScanSuccess}
-      />
+      {/* Camera QR Scanner Modal — mounted only once opened, so its chunk isn't fetched on page load */}
+      {scannerOpen && (
+        <QrScannerModal
+          isOpen={scannerOpen}
+          onClose={() => setScannerOpen(false)}
+          onScan={handleScanSuccess}
+        />
+      )}
     </div>
   );
 }

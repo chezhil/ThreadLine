@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
 import { Button } from "@/components/quality/ui/Button";
@@ -12,7 +13,6 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { Drawer } from "@/components/quality/ui/Drawer";
 import { RollQrLabel } from "@/components/rolls/RollQrLabel";
-import { QrScannerModal } from "@/components/rolls/QrScannerModal";
 import {
   Layers,
   Plus,
@@ -23,6 +23,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
+
+// The QR decoder (jsqr) and camera wiring only matter once the scan sheet is
+// open, so keep them out of this page's initial bundle.
+const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
 
 const PAGE_SIZE = 50;
 
@@ -451,14 +455,16 @@ export default function RollsListPage() {
         </div>
       )}
 
-      {/* QR Scanner */}
-      <QrScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onScan={(token) => {
-          window.location.href = `/quality/rolls/search?token=${encodeURIComponent(token)}`;
-        }}
-      />
+      {/* QR Scanner — mounted only once opened, so its chunk isn't fetched on page load */}
+      {isScannerOpen && (
+        <QrScannerModal
+          isOpen={isScannerOpen}
+          onClose={() => setIsScannerOpen(false)}
+          onScan={(token) => {
+            window.location.href = `/quality/rolls/search?token=${encodeURIComponent(token)}`;
+          }}
+        />
+      )}
     </div>
   );
 }

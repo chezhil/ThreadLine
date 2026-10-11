@@ -109,6 +109,28 @@
 .production-error > button { margin-left: var(--space-2); }
 .production-muted { color: var(--color-muted); }
 
+/* Distinct from "nothing to show": a spinner so a loading screen can't be
+   mistaken for an empty one at a glance. */
+.production-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-muted);
+  padding-block: var(--space-2);
+}
+.production-loading::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--color-muted) 35%, transparent);
+  border-top-color: var(--color-action);
+  border-radius: 50%;
+  animation: production-spin 0.7s linear infinite;
+}
+@keyframes production-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Machine tile: a 3px status rail and a square pip, as on the Stitch shed grid. */
 .production-status {
   position: relative;

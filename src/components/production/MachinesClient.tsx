@@ -70,7 +70,7 @@ export function MachinesClient() {
           <label>Search <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Machine name" /></label>
           <label>Filter status <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></label>
         </div>
-        {!data && !loadError && <p>Loading machines…</p>}
+        {!data && !loadError && <p className="production-loading" role="status">Loading machines…</p>}
         {data?.machines.length === 0 && <p>No machines yet. Add the first machine.</p>}
         {data && data.machines.length > 0 && visibleMachines.length === 0 && <p>No machines match these filters.</p>}
         <div className="production-list">{visibleMachines.map((machine) => <MachineCard key={machine.id} machine={machine} onStatus={changeStatus} onChanged={refresh} />)}</div>

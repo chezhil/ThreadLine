@@ -33,7 +33,7 @@ export function Sidebar({ role, userName }: { role: Role; userName: string }) {
   return (
     // The column stretches with the page; its contents stay pinned on screen.
     <aside className="hidden w-64 shrink-0 select-none border-r border-border bg-white md:block xl:w-72">
-      <div className="sticky top-0 flex h-screen flex-col">
+      <div className="sticky top-0 relative flex h-screen flex-col">
         <div className="border-b border-border px-4 pb-3 pt-4">
           <div className="flex items-center gap-2.5">
             <BrandMark />
@@ -73,14 +73,17 @@ export function Sidebar({ role, userName }: { role: Role; userName: string }) {
             </span>
           </div>
           <LiveClock className="mt-1 block text-sm font-semibold text-foreground" />
-          <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+          <div className="mt-2 border-t border-border pt-2">
             <span className="text-xs text-gray-500">{roleLabel.title}</span>
-            <LogoutButton className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 transition-colors hover:text-red-700">
-              <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-              Sign out
-            </LogoutButton>
           </div>
         </div>
+
+        {/* Quick-access sign out, pinned at the sidebar's bottom-right corner
+            so it's reachable without reading the footer row above. */}
+        <LogoutButton className="absolute bottom-3 right-3 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white text-gray-500 shadow-sm transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700">
+          <span className="sr-only">Sign out</span>
+          <LogOut className="h-4 w-4" aria-hidden="true" />
+        </LogoutButton>
       </div>
     </aside>
   );
