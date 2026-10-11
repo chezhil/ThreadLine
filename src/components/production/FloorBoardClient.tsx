@@ -18,7 +18,7 @@ export function FloorBoardClient() {
     <h1>Live floor board</h1>
     <p className="production-muted">Machine status, current order and today’s output update as production is recorded.</p>
     {error && <p role="alert" className="production-error">{error} <button onClick={refresh}>Retry</button></p>}
-    {!data && !error && <p>Loading floor board…</p>}
+    {!data && !error && <p className="production-loading" role="status">Loading floor board…</p>}
     {data?.machines.length === 0 && <p>No machines yet. Add a machine to start the board.</p>}
     <section aria-label="Machine status" className="production-grid">
       {data?.machines.map((machine) => {

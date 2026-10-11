@@ -10,7 +10,7 @@ import { Input } from "@/components/quality/ui/Input";
 import { Select } from "@/components/quality/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/quality/ui/Table";
 import { EmptyState } from "@/components/quality/ui/EmptyState";
-import { QrScannerModal } from "@/components/rolls/QrScannerModal";
+import dynamic from "next/dynamic";
 import { enqueueOfflineMutation, newMutationId } from "@/lib/offline-queue";
 import { GST_RATE } from "@/lib/billing";
 import {
@@ -29,6 +29,25 @@ import {
 import Link from "next/link";
 import { WhatsAppPreviewModal } from "@/components/dispatch/WhatsAppPreviewModal";
 import type { DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
+
+// The QR decoder (jsqr) and camera wiring only matter once the scan sheet is
+// open, so keep them out of this page's initial bundle — field devices feel
+// this most on first load.
+const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
+
+// Distinct from EmptyState so a still-loading table can't be mistaken for a
+// genuinely empty one.
+function LoadingRow({ label }: { label: string }) {
+  return (
+    <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-slate-500">
+      <svg className="animate-spin h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      </svg>
+      {label}
+    </div>
+  );
+}
 
 export default function DispatchPage() {
   const [buyers, setBuyers] = useState<any[]>([]);
@@ -424,7 +443,9 @@ export default function DispatchPage() {
                 ) : null
               }
             >
-              {eligibleRollsForBuyer.length === 0 ? (
+              {loading ? (
+                <LoadingRow label="Loading eligible rolls…" />
+              ) : eligibleRollsForBuyer.length === 0 ? (
                 <EmptyState
                   icon={<Layers className="w-8 h-8 text-slate-300" />}
                   title="No PASS rolls for this buyer"
@@ -438,7 +459,7 @@ export default function DispatchPage() {
                   }
                 />
               ) : (
-                <Table>
+                <Table className="min-w-[640px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10">Select</TableHead>
@@ -585,14 +606,16 @@ export default function DispatchPage() {
       ) : (
         /* Dispatch History Table */
         <Card title="Past Dispatches" subtitle="Completed truck departures and invoices">
-          {dispatches.length === 0 ? (
+          {loading ? (
+            <LoadingRow label="Loading dispatch history…" />
+          ) : dispatches.length === 0 ? (
             <EmptyState
               icon={<Truck className="w-8 h-8 text-slate-300" />}
               title="No past dispatches"
               description="No trucks have been dispatched yet."
             />
           ) : (
-            <Table>
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Truck No</TableHead>
@@ -711,13 +734,15 @@ export default function DispatchPage() {
         </div>
       )}
 
-      {/* QR Scanner */}
-      <QrScannerModal
-        isOpen={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        onScan={handleScanRollOntoTruck}
-        title="Scan Roll onto Truck"
-      />
+      {/* QR Scanner — mounted only once opened, so its chunk isn't fetched on page load */}
+      {scannerOpen && (
+        <QrScannerModal
+          isOpen={scannerOpen}
+          onClose={() => setScannerOpen(false)}
+          onScan={handleScanRollOntoTruck}
+          title="Scan Roll onto Truck"
+        />
+      )}
 
       {/* WhatsApp Dispatch Confirmation Preview */}
       <WhatsAppPreviewModal

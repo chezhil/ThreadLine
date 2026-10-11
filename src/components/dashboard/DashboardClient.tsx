@@ -30,6 +30,7 @@ import type { MonthPool, OrderCosting } from "@/lib/accounts/costing";
 import type { MachineOutput, MachineOutputRow } from "@/lib/accounts/machine-output";
 import { MonthPicker } from "@/components/accounts/MonthPicker";
 import { ErrorNote, Loading, PageTitle } from "@/components/accounts/Stat";
+import { Pager } from "@/components/ui";
 import { SUGGESTIONS } from "@/components/assistant/AssistantClient";
 
 // The owner's one screen, laid out as the Stitch executive dashboard
@@ -616,13 +617,22 @@ function MarginBar({ v }: { v: MarginView }) {
   );
 }
 
+const ORDER_MARGINS_PAGE_SIZE = 20;
+
 function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loading: boolean; error: string | null; retry: () => void }) {
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const rows = useMemo(() => {
     const all = [...(data?.realised ?? []), ...(data?.inProgress ?? [])];
     const q = query.trim().toLowerCase();
     return q ? all.filter((o) => `${o.orderNo} ${o.buyerName} ${o.fabric}`.toLowerCase().includes(q)) : all;
   }, [data, query]);
+  // Only the current page's rows ever hit the DOM — the full filtered set
+  // still backs the aggregate totals and CSV export below.
+  const pagedRows = useMemo(
+    () => rows.slice((page - 1) * ORDER_MARGINS_PAGE_SIZE, page * ORDER_MARGINS_PAGE_SIZE),
+    [rows, page],
+  );
 
   const booked = rows.filter((o) => o.stage === "final");
   const totals = {
@@ -656,7 +666,7 @@ function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loa
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setPage(1); }}
             placeholder="Filter buyer / order no…"
             className="w-full border border-border-strong/70 bg-surface-low py-1.5 pl-8 pr-2 text-[13px] outline-none transition-colors placeholder:text-gray-400 focus:border-brand-tint focus:bg-white focus:ring-2 focus:ring-brand-tint/20"
           />
@@ -687,7 +697,7 @@ function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loa
         <>
           {/* Phones: one card per order. */}
           <ul className="mt-3 flex flex-col gap-2 md:hidden">
-            {rows.map((o) => {
+            {pagedRows.map((o) => {
               const v = marginView(o);
               return (
                 <li key={o.orderId} className="bg-surface-low p-3">
@@ -743,7 +753,7 @@ function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loa
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((o) => {
+                {pagedRows.map((o) => {
                   const v = marginView(o);
                   return (
                     <tr key={o.orderId} className={`align-top transition-colors hover:bg-brand-soft/25 ${v.tone === "red" || v.tone === "amber" ? "bg-amber-50/30" : ""}`}>
@@ -795,6 +805,12 @@ function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loa
               </tfoot>
             </table>
           </div>
+
+          {rows.length > ORDER_MARGINS_PAGE_SIZE && (
+            <div className="mt-3">
+              <Pager page={page} pageSize={ORDER_MARGINS_PAGE_SIZE} total={rows.length} onPageChange={setPage} />
+            </div>
+          )}
         </>
       )}
     </Panel>
