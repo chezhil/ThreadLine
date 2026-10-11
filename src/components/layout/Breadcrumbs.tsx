@@ -4,7 +4,19 @@ import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { navItemForPath } from "./nav-config";
 
+// Sub-pages read the same as their tab ("QC queue", not "Qc").
+const SEGMENT_LABELS: Record<string, string> = {
+  qc: "QC queue",
+  rolls: "Rolls & labels",
+  defects: "Defect analytics",
+  "floor-board": "Floor board",
+  "work-orders": "Work orders",
+  costing: "Cost per order",
+  buyers: "Buyers",
+};
+
 function titleCase(segment: string) {
+  if (SEGMENT_LABELS[segment]) return SEGMENT_LABELS[segment];
   return segment
     .replace(/-/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
