@@ -393,6 +393,19 @@ h4 {
       transform: scaleX(0.9);
     }
   }
+  /* A tile just updated from a live realtime push (not from a page load) —
+     a brief tint so the change is obvious even across a room, for demos. */
+  --animate-flash-update: flash-update 1.1s ease-out;
+  @keyframes flash-update {
+    0% {
+      background-color: color-mix(in srgb, var(--brand-tint) 40%, transparent);
+      box-shadow: inset 0 0 0 1px var(--brand-tint);
+    }
+    100% {
+      background-color: transparent;
+      box-shadow: inset 0 0 0 1px transparent;
+    }
+  }
 }
 
 [data-motion="reduced"] *,

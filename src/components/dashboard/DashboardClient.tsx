@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,6 +19,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { useApi } from "@/lib/useApi";
+import { useFlash } from "@/lib/useFlash";
 import { useRealtimeConnected, useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
 import { statusBadgeClass, statusColor, type StatusColorKey } from "@/lib/tokens";
@@ -75,16 +76,42 @@ export function DashboardClient() {
   const alerts = useApi<{ notifications: NotificationRow[]; unreadCount: number }>("/api/alerts?unread=1&limit=5");
   const approvals = useApi<PendingApprovals>("/api/approvals/pending");
 
+  // Bumped from inside the realtime handlers below so the affected tiles can
+  // briefly flash — a live push is otherwise just a number quietly changing,
+  // easy to miss on a screen nobody's staring at.
+  const [orderTick, setOrderTick] = useState(0);
+  const [outputTick, setOutputTick] = useState(0);
+  const [defectsTick, setDefectsTick] = useState(0);
+  const [flashMachineId, setFlashMachineId] = useState<string | null>(null);
+  const orderFlash = useFlash(orderTick);
+  const outputFlash = useFlash(outputTick);
+  const defectsFlash = useFlash(defectsTick);
+
   useRealtimeEvent(RealtimeEvents.OrderStatus, () => {
     summary.refetch();
     costs.refetch();
+    setOrderTick((t) => t + 1);
   });
-  useRealtimeEvent(RealtimeEvents.MachineStatus, () => output.refetch());
-  useRealtimeEvent(RealtimeEvents.QcCompleted, () => defects.refetch());
+  useRealtimeEvent<{ machineId: string }>(RealtimeEvents.MachineStatus, (payload) => {
+    output.refetch();
+    setOutputTick((t) => t + 1);
+    setFlashMachineId(payload.machineId);
+  });
+  useRealtimeEvent(RealtimeEvents.QcCompleted, () => {
+    defects.refetch();
+    setDefectsTick((t) => t + 1);
+  });
   useRealtimeEvent(RealtimeEvents.NotificationNew, () => {
     alerts.refetch();
     approvals.refetch();
   });
+
+  // Clears the per-machine highlight a beat after it's set.
+  useEffect(() => {
+    if (!flashMachineId) return;
+    const timer = setTimeout(() => setFlashMachineId(null), 1100);
+    return () => clearTimeout(timer);
+  }, [flashMachineId]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -99,19 +126,19 @@ export function DashboardClient() {
       {output.error && <ErrorNote message={`Couldn't load loom output: ${output.error}`} onRetry={output.refetch} />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
-        <OutputTile data={output.data} />
-        <LoomsTile data={output.data} />
-        <RevenueTile data={summary.data} />
-        <ReceivablesTile data={summary.data} />
+        <OutputTile data={output.data} flash={outputFlash} />
+        <LoomsTile data={output.data} flash={outputFlash} />
+        <RevenueTile data={summary.data} flash={orderFlash} />
+        <ReceivablesTile data={summary.data} flash={orderFlash} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex min-w-0 flex-col gap-4">
-          <LoomFloor data={output.data} loading={output.loading} />
-          <OrderMargins data={costs.data} loading={costs.loading} error={costs.error} retry={costs.refetch} />
+          <LoomFloor data={output.data} loading={output.loading} flashMachineId={flashMachineId} />
+          <OrderMargins data={costs.data} loading={costs.loading} error={costs.error} retry={costs.refetch} flash={orderFlash} />
         </div>
         <div className="flex min-w-0 flex-col gap-4">
-          <QualityOutlier data={defects.data} loading={defects.loading} error={defects.error} />
+          <QualityOutlier data={defects.data} loading={defects.loading} error={defects.error} flash={defectsFlash} />
           <AlertsPanel data={alerts.data} loading={alerts.loading} error={alerts.error} />
           <AssistantTerminal />
         </div>
@@ -188,14 +215,16 @@ function Kpi({
   corner,
   children,
   footer,
+  flash = false,
 }: {
   label: string;
   corner?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  flash?: boolean;
 }) {
   return (
-    <Panel className="flex flex-col justify-between p-4">
+    <Panel className={`flex flex-col justify-between p-4 ${flash ? "animate-flash-update" : ""}`}>
       <div>
         <div className="flex items-start justify-between gap-2 pb-1">
           <h2 className="label-caps max-w-[70%] text-gray-500">{label}</h2>
@@ -243,7 +272,7 @@ function Bars({ series, className = "h-8", highlightLast = true }: { series: { d
 
 /* ───────────────────────── KPI tiles ───────────────────────── */
 
-function OutputTile({ data }: { data: MachineOutput | null }) {
+function OutputTile({ data, flash }: { data: MachineOutput | null; flash: boolean }) {
   const machines = data?.machines ?? [];
   const today = data?.totals.todayOutput ?? 0;
   const capacity = machines.reduce((s, m) => s + m.capacityMetresPerShift, 0) * SHIFTS_PER_DAY;
@@ -254,6 +283,7 @@ function OutputTile({ data }: { data: MachineOutput | null }) {
   return (
     <Kpi
       label="Today's output"
+      flash={flash}
       corner={<Ruler className="h-4 w-4 text-gray-400" aria-hidden="true" />}
       footer={
         data ? (
@@ -285,7 +315,7 @@ function OutputTile({ data }: { data: MachineOutput | null }) {
   );
 }
 
-function LoomsTile({ data }: { data: MachineOutput | null }) {
+function LoomsTile({ data, flash }: { data: MachineOutput | null; flash: boolean }) {
   const machines = data?.machines ?? [];
   const by = (s: string) => machines.filter((m) => m.status.toLowerCase() === s).length;
   const running = by("running");
@@ -300,6 +330,7 @@ function LoomsTile({ data }: { data: MachineOutput | null }) {
   return (
     <Kpi
       label="Active looms availability"
+      flash={flash}
       corner={avgUtil != null ? <Chip tone={avgUtil >= 75 ? "green" : "amber"}>{pct(avgUtil, 0)} util · 7d</Chip> : undefined}
       footer={
         data ? (
@@ -341,11 +372,12 @@ function LoomsTile({ data }: { data: MachineOutput | null }) {
   );
 }
 
-function RevenueTile({ data }: { data: MonthSummary | null }) {
+function RevenueTile({ data, flash }: { data: MonthSummary | null; flash: boolean }) {
   const p = data?.pnl;
   return (
     <Kpi
       label={`Revenue booked${data ? ` · ${data.label}` : ""}`}
+      flash={flash}
       corner={
         p && p.marginPct != null ? (
           <Chip tone={p.marginPct < 0 ? "red" : "green"}>
@@ -384,11 +416,12 @@ function RevenueTile({ data }: { data: MonthSummary | null }) {
   );
 }
 
-function ReceivablesTile({ data }: { data: MonthSummary | null }) {
+function ReceivablesTile({ data, flash }: { data: MonthSummary | null; flash: boolean }) {
   const r = data?.receivables;
   return (
     <Kpi
       label="Pending receivables"
+      flash={flash}
       corner={<Landmark className="h-4 w-4 text-gray-400" aria-hidden="true" />}
       footer={
         data ? (
@@ -435,7 +468,7 @@ function floorBucket(status: string): Exclude<FloorFilter, "all"> {
   return s === "running" ? "running" : s === "idle" ? "idle" : "down";
 }
 
-function LoomFloor({ data, loading }: { data: MachineOutput | null; loading: boolean }) {
+function LoomFloor({ data, loading, flashMachineId }: { data: MachineOutput | null; loading: boolean; flashMachineId: string | null }) {
   const [filter, setFilter] = useState<FloorFilter>("all");
   const live = useRealtimeConnected();
   const machines = data?.machines ?? [];
@@ -483,7 +516,7 @@ function LoomFloor({ data, loading }: { data: MachineOutput | null; loading: boo
       {shown.length > 0 && (
         <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
           {shown.map((m) => (
-            <LoomTile key={m.machineId} m={m} peak={peak} />
+            <LoomTile key={m.machineId} m={m} peak={peak} flash={m.machineId === flashMachineId} />
           ))}
         </ul>
       )}
@@ -509,7 +542,7 @@ function LoomFloor({ data, loading }: { data: MachineOutput | null; loading: boo
   );
 }
 
-function LoomTile({ m, peak }: { m: MachineOutputRow; peak: number }) {
+function LoomTile({ m, peak, flash = false }: { m: MachineOutputRow; peak: number; flash?: boolean }) {
   const tone = machineTone(m.status);
   const down = tone === "red";
   const idle = tone === "amber";
@@ -517,7 +550,7 @@ function LoomTile({ m, peak }: { m: MachineOutputRow; peak: number }) {
   const over = m.utilisationPct != null && m.utilisationPct > 100;
 
   return (
-    <li className={`relative flex flex-col gap-1 p-2.5 transition-colors ${shell}`}>
+    <li className={`relative flex flex-col gap-1 p-2.5 transition-colors ${shell} ${flash ? "animate-flash-update" : ""}`}>
       <div className="flex items-start justify-between gap-1">
         <span className={`truncate font-display text-[15px] font-semibold ${down ? "text-red-700" : idle ? "text-amber-800" : "text-foreground"}`} title={m.name}>
           {m.name}
@@ -619,7 +652,7 @@ function MarginBar({ v }: { v: MarginView }) {
 
 const ORDER_MARGINS_PAGE_SIZE = 20;
 
-function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loading: boolean; error: string | null; retry: () => void }) {
+function OrderMargins({ data, loading, error, retry, flash }: { data: Costs | null; loading: boolean; error: string | null; retry: () => void; flash: boolean }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const rows = useMemo(() => {
@@ -656,7 +689,7 @@ function OrderMargins({ data, loading, error, retry }: { data: Costs | null; loa
   }
 
   return (
-    <Panel className="p-4">
+    <Panel className={`p-4 ${flash ? "animate-flash-update" : ""}`}>
       <PanelTitle title="Order Profitability & Direct Margins" action={<PanelLink href="/accounts/costing">Cost breakdown</PanelLink>} />
       <p className="mt-1 text-[13px] text-gray-500">Yarn, floor wages, power and mill overheads allocated to every order this month.</p>
 
@@ -825,13 +858,13 @@ const DEFECT_LABEL: Record<string, string> = {
   uneven_weave: "Uneven weave",
 };
 
-function QualityOutlier({ data, loading, error }: { data: DefectsResponse | null; loading: boolean; error: string | null }) {
+function QualityOutlier({ data, loading, error, flash }: { data: DefectsResponse | null; loading: boolean; error: string | null; flash: boolean }) {
   const worst = data?.byMachine.find((m) => m.reject > 0);
   const topDefect = worst ? Object.entries(worst.defects).sort(([, a], [, b]) => b - a)[0] : undefined;
   const critical = worst ? worst.shareOfTotalRejects >= 50 : false;
 
   return (
-    <Panel className="p-4">
+    <Panel className={`p-4 ${flash ? "animate-flash-update" : ""}`}>
       {error && <ErrorNote message={`Couldn't load defect analytics: ${error}`} />}
       {loading && !data && <Loading label="Checking QC records…" />}
       {data && !worst && (
