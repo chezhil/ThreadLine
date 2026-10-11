@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   // The dev-only "N" badge sat on top of the sidebar's Mill Clock.
   devIndicators: false,
+  // pg and @prisma/client are external by default; keep the adapter beside them.
+  serverExternalPackages: ["@prisma/adapter-pg"],
   // Module 3 shipped at /qc, /rolls and /defects; the integrated app serves
   // them under /quality. Keep old links and printed roll labels working.
   async redirects() {

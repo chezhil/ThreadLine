@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { Badge, Button, Card, CardHeader, ConfirmButton, Drawer, EmptyState, Input } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, ConfirmButton, Drawer, EmptyState, Input, Pager } from "@/components/ui";
+import { usePaged } from "@/lib/usePaged";
 import { firstError, postJson } from "@/lib/useApi";
 import { yarnTypeSchema } from "@/lib/validation/yarn";
 import { useZodForm } from "@/components/accounts/useZodForm";
@@ -12,6 +13,7 @@ export function YarnTypesTab({ yarnTypes, onChanged }: { yarnTypes: YarnTypeRow[
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const visible = yarnTypes.filter((t) => showArchived || !t.archivedAt);
+  const paged = usePaged(visible);
   const archivedCount = yarnTypes.length - yarnTypes.filter((t) => !t.archivedAt).length;
 
   async function setArchived(t: YarnTypeRow, archived: boolean) {
@@ -42,7 +44,7 @@ export function YarnTypesTab({ yarnTypes, onChanged }: { yarnTypes: YarnTypeRow[
         <EmptyState title={yarnTypes.length ? "No active yarn types" : "No yarn types yet"} description="Add the yarns the mill stocks." />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {visible.map((yt) => {
+          {paged.pageRows.map((yt) => {
             const remaining = yt.lots.reduce((s, l) => s + l.qtyRemainingKg, 0);
             const low = remaining <= yt.lowStockThresholdKg;
             const inUse = yt._count.lots + yt._count.purchaseRequests > 0;
@@ -86,6 +88,7 @@ export function YarnTypesTab({ yarnTypes, onChanged }: { yarnTypes: YarnTypeRow[
           })}
         </div>
       )}
+      {paged.showPager && <Pager {...paged.pagerProps} />}
 
       <Drawer open={!!editing} onClose={() => setEditing(null)} title={editing === "new" ? "Add yarn type" : "Edit yarn type"}>
         {editing && (

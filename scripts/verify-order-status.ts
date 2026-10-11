@@ -103,7 +103,7 @@ async function main() {
   const yarnType = as<{ yarnType: WithId }>(
     (
       await owner("POST", "/api/yarn-types", {
-        name: "Status Test Yarn",
+        name: `Status Test Yarn ${Date.now()}`, // unique per run: yarn types are unique by name/count/colour
         count: "1s",
         material: "Test",
         colour: "Test",

@@ -82,6 +82,8 @@ export function ShellProvider({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        // A reload or navigation right after a toggle must not abort the save.
+        keepalive: true,
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { fieldErrors?: Record<string, string[]>; error?: string } | null;

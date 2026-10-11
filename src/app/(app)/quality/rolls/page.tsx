@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
 import { Button } from "@/components/quality/ui/Button";
+import { Pager } from "@/components/ui";
 import { Badge } from "@/components/quality/ui/Badge";
 import { Card } from "@/components/quality/ui/Card";
 import { Input } from "@/components/quality/ui/Input";
@@ -12,32 +13,36 @@ import { Select } from "@/components/quality/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/quality/ui/Table";
 import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { Drawer } from "@/components/quality/ui/Drawer";
-import { RollQrLabel } from "@/components/rolls/RollQrLabel";
 import {
   Layers,
   Plus,
   Printer,
   Scan,
   Search,
-  ChevronRight,
   ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { RollRow } from "@/lib/quality/types";
 
 // The QR decoder (jsqr) and camera wiring only matter once the scan sheet is
 // open, so keep them out of this page's initial bundle.
 const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
 
+// The label pulls in the qrcode encoder; it's only shown in the print modal.
+const RollQrLabel = dynamic(() => import("@/components/rolls/RollQrLabel").then((m) => m.RollQrLabel), { ssr: false });
+
 const PAGE_SIZE = 50;
 
 export default function RollsListPage() {
-  const [rolls, setRolls] = useState<any[]>([]);
+  const router = useRouter();
+  const [rolls, setRolls] = useState<RollRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [isMintOpen, setIsMintOpen] = useState(false);
-  const [selectedRollForPrint, setSelectedRollForPrint] = useState<any | null>(null);
+  const [selectedRollForPrint, setSelectedRollForPrint] = useState<RollRow | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // Mint Form State
@@ -303,29 +308,7 @@ export default function RollsListPage() {
         )}
       </Card>
 
-      {total > 0 && (
-        <div className="flex items-center justify-between gap-3 px-1 text-xs text-slate-500">
-          <span>
-            {(page - 1) * PAGE_SIZE + 1}–{Math.min(total, page * PAGE_SIZE)} of {total}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <span className="tabular-nums">
-              Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= Math.ceil(total / PAGE_SIZE)}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      {total > PAGE_SIZE && <Pager page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
 
       {/* Mint Roll Drawer */}
       <Drawer
@@ -461,7 +444,7 @@ export default function RollsListPage() {
           isOpen={isScannerOpen}
           onClose={() => setIsScannerOpen(false)}
           onScan={(token) => {
-            window.location.href = `/quality/rolls/search?token=${encodeURIComponent(token)}`;
+            router.push(`/quality/rolls/search?token=${encodeURIComponent(token)}`);
           }}
         />
       )}

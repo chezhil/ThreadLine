@@ -118,6 +118,7 @@ function replayedPayment(existing: PaymentWithInvoice, invoiceId: string) {
     return NextResponse.json({ error: "This payment id was already used for another invoice" }, { status: 409 });
   }
   const paidSoFar = existing.invoice.payments.reduce((s, p) => s + p.amount, 0);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped from the response
   const { invoice: _invoice, ...payment } = existing;
   return NextResponse.json({ payment, outstanding: round2(existing.invoice.total - paidSoFar) }, { status: 200 });
 }

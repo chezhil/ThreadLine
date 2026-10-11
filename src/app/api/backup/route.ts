@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import fs from "fs";
 import { qualityActor } from "@/lib/quality/auth";
 import { sqliteFilePath } from "@/lib/quality/db-file";
 import { snapshotTo } from "@/lib/quality/db-snapshot";
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   // A full copy of the database (incl. password hashes) — owner only.
   const actor = await qualityActor("owner");
   if ("response" in actor) return actor.response;

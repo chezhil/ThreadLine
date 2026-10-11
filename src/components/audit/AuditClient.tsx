@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useState } from "react";
-import { Button, EmptyState, Input, Select } from "@/components/ui";
+import { EmptyState, Input, Pager, Select } from "@/components/ui";
 import { useApi } from "@/lib/useApi";
 import { ErrorNote, Loading, PageTitle } from "@/components/accounts/Stat";
 import { dateTimeIN } from "@/lib/accounts/format";
@@ -95,7 +95,6 @@ export function AuditClient() {
   if (q.trim()) params.set("q", q.trim());
   const { data, loading, error, refetch } = useApi<AuditResponse>(`/api/audit?${params}`);
 
-  const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   const resetPage = <T,>(fn: (v: T) => void) => (v: T) => {
     setPage(1);
     fn(v);
@@ -170,21 +169,7 @@ export function AuditClient() {
           </div>
         ))}
 
-      {data && data.total > 0 && (
-        <div className="flex items-center justify-between text-sm text-gray-600">
-          <span>
-            {data.total} entr{data.total === 1 ? "y" : "ies"} · page {page} of {pages}
-          </span>
-          <div className="flex gap-2">
-            <Button size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <Button size="sm" variant="secondary" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      {data && data.total > PAGE_SIZE && <Pager page={page} pageSize={PAGE_SIZE} total={data.total} onPageChange={setPage} />}
     </div>
   );
 }

@@ -167,7 +167,7 @@ export function ExpensesClient() {
 }
 
 function ExpenseForm({ onSaved }: { onSaved: () => void }) {
-  const orders = useApi<{ orders: { id: string; orderNo: string; buyer: { name: string } }[] }>("/api/orders");
+  const orders = useApi<{ orders: { id: string; orderNo: string; buyer: { name: string } }[] }>("/api/orders?view=options");
   const form = useZodForm(expenseSchema, { category: "", amount: "", date: todayIST(), orderId: "", note: "" });
 
   async function submit(e: React.FormEvent) {
@@ -218,7 +218,7 @@ function ExpenseForm({ onSaved }: { onSaved: () => void }) {
 }
 
 function ReverseExpenseForm({ expense, onSaved }: { expense: ExpenseRow; onSaved: (message: string) => void }) {
-  const orders = useApi<{ orders: { id: string; orderNo: string; buyer: { name: string } }[] }>("/api/orders");
+  const orders = useApi<{ orders: { id: string; orderNo: string; buyer: { name: string } }[] }>("/api/orders?view=options");
   const [reason, setReason] = useState("");
   const [correct, setCorrect] = useState(false);
   const [category, setCategory] = useState(expense.category);

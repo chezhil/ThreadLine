@@ -9,7 +9,7 @@ import crypto from "crypto";
 import type { Prisma } from "@prisma/client";
 import { withRetry, writeTransaction } from "@/lib/concurrency";
 import { recomputeRollAggregates, recordStatusChanges } from "@/lib/order-status";
-import { presentRolls, rollInclude } from "@/lib/quality/roll-view";
+import { canSeeCommercial, presentRolls, rollInclude } from "@/lib/quality/roll-view";
 import { lotServesOrder } from "@/lib/quality/lineage";
 import { parsePageParams } from "@/lib/pagination";
 
@@ -50,11 +50,49 @@ export async function GET(req: NextRequest) {
     }
 
     if (search) {
+      // Case-insensitive like the SQLite LIKE this was written against
+      // (Postgres `contains` is case-sensitive by default).
+      const like = { contains: search, mode: "insensitive" as const };
       where.OR = [
-        { rollNo: { contains: search } },
-        { order: { orderNo: { contains: search } } },
-        { qrToken: { contains: search } },
+        { rollNo: like },
+        { order: { orderNo: like } },
+        { qrToken: like },
+        { machine: { name: like } },
+        { yarnLot: { lotNo: like } },
       ];
+    }
+
+    // The dispatch screen lists every PASS roll in store and needs only what
+    // goes on a truck and its invoice — not QC history or yarn lineage
+    // (~720 KB → a fraction of that at ~400 rolls, refetched on every push).
+    if (searchParams.get("view") === "dispatch" && canSeeCommercial(actor.user.role)) {
+      const dispatchRows = await db.roll.findMany({
+        where,
+        orderBy: { rollNo: "desc" },
+        select: {
+          id: true,
+          rollNo: true,
+          qrToken: true,
+          qcStatus: true,
+          lengthMetres: true,
+          weightKg: true,
+          dispatchId: true,
+          orderId: true,
+          machine: { select: { name: true } },
+          order: {
+            select: {
+              id: true,
+              orderNo: true,
+              fabricType: true,
+              buyerId: true,
+              pricePerMetre: true,
+              buyer: { select: { id: true, name: true, contact: true } },
+              invoices: { select: { id: true, invoiceNo: true } },
+            },
+          },
+        },
+      });
+      return NextResponse.json(dispatchRows);
     }
 
     const { paginated, page, pageSize, skip, take } = parsePageParams(searchParams);
@@ -71,8 +109,18 @@ export async function GET(req: NextRequest) {
     // existing caller expects that); a `page` param switches to the
     // {rolls,total} shape so the list page can show a pager.
     if (!paginated) return NextResponse.json(presented);
-    const total = await db.roll.count({ where });
-    return NextResponse.json({ rolls: presented, total, page, pageSize });
+    const unfiltered: Prisma.RollWhereInput = { ...where };
+    delete unfiltered.qcStatus;
+    const [total, byStatus] = await Promise.all([
+      db.roll.count({ where }),
+      // Per-status totals for the same search/filters (ignoring the status
+      // filter itself), so a paged queue can still show its status tiles.
+      searchParams.get("withCounts")
+        ? db.roll.groupBy({ by: ["qcStatus"], where: unfiltered, _count: { _all: true } })
+        : Promise.resolve(null),
+    ]);
+    const counts = byStatus && Object.fromEntries(byStatus.map((row) => [row.qcStatus, row._count._all]));
+    return NextResponse.json({ rolls: presented, total, page, pageSize, ...(counts ? { counts } : {}) });
   } catch (err) {
     console.error("Failed to fetch rolls:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

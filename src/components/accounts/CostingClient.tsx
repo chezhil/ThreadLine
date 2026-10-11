@@ -149,6 +149,8 @@ export function CostingClient() {
               },
             ]}
             rows={rows}
+            // The "all orders" view is already paged by the server.
+            pageSize={view === "all" ? false : undefined}
             keyFor={(o) => o.orderId}
             emptyState={
               <EmptyState

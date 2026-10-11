@@ -22,7 +22,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <ShellFrame>
         <Sidebar role={user.role} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <AppHeader role={user.role} userId={user.id} />
+          {/* File backup/restore only exists for the SQLite layout; Postgres uses the provider's tooling. */}
+          <AppHeader role={user.role} userId={user.id} fileBackups={!!process.env.DATABASE_URL?.startsWith("file:")} />
           <PageTransition className="flex-1 p-4 pb-24 md:pb-6">{children}</PageTransition>
           <BottomTabs role={user.role} />
         </div>

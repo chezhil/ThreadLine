@@ -4,7 +4,8 @@ import React, { useEffect, useState } from "react";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import { Button } from "@/components/quality/ui/Button";
-import { Badge } from "@/components/quality/ui/Badge";
+import { Pager } from "@/components/ui";
+
 import { Card } from "@/components/quality/ui/Card";
 import { Input } from "@/components/quality/ui/Input";
 import { Select } from "@/components/quality/ui/Select";
@@ -16,23 +17,20 @@ import { GST_RATE } from "@/lib/billing";
 import {
   Truck,
   Scan,
-  CheckCircle2,
-  AlertCircle,
   FileText,
-  Clock,
   Layers,
   ShieldCheck,
-  PackageCheck,
-  ChevronRight,
   MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
-import { WhatsAppPreviewModal } from "@/components/dispatch/WhatsAppPreviewModal";
 import type { DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
+import type { BuyerRef, DispatchRoll, DispatchRow, OrderRef, RollRow } from "@/lib/quality/types";
 
 // The QR decoder (jsqr) and camera wiring only matter once the scan sheet is
 // open, so keep them out of this page's initial bundle — field devices feel
 // this most on first load.
+// The preview/send sheet only matters once opened; keep it out of the page's first load.
+const WhatsAppPreviewModal = dynamic(() => import("@/components/dispatch/WhatsAppPreviewModal").then((m) => m.WhatsAppPreviewModal), { ssr: false });
 const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
 
 // Distinct from EmptyState so a still-loading table can't be mistaken for a
@@ -50,15 +48,19 @@ function LoadingRow({ label }: { label: string }) {
 }
 
 export default function DispatchPage() {
-  const [buyers, setBuyers] = useState<any[]>([]);
+  const [buyers, setBuyers] = useState<BuyerRef[]>([]);
   const [selectedBuyerId, setSelectedBuyerId] = useState<string>("");
   const [truckNo, setTruckNo] = useState("TN-38-AX-9942");
-  const [availableRolls, setAvailableRolls] = useState<any[]>([]);
+  const [availableRolls, setAvailableRolls] = useState<DispatchRoll[]>([]);
   const [selectedRollIds, setSelectedRollIds] = useState<string[]>([]);
-  const [dispatches, setDispatches] = useState<any[]>([]);
+  const [dispatches, setDispatches] = useState<DispatchRow[]>([]);
   const [dispatchTotal, setDispatchTotal] = useState(0);
   const [dispatchPage, setDispatchPage] = useState(1);
   const DISPATCH_PAGE_SIZE = 30;
+  // A buyer can have hundreds of rolls in store; only one page of rows is
+  // rendered ("Select All" still selects every eligible roll).
+  const [eligiblePage, setEligiblePage] = useState(1);
+  const ELIGIBLE_PAGE_SIZE = 25;
   const [activeTab, setActiveTab] = useState<"new" | "history">("new");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -86,22 +88,24 @@ export default function DispatchPage() {
     const load = async () => {
       try {
         // 1. Fetch undispatched rolls with PASS status
-        const rollsRes = await fetch("/api/rolls?qcStatus=PASS&dispatched=false");
+        const rollsRes = await fetch("/api/rolls?qcStatus=PASS&dispatched=false&view=dispatch");
         if (rollsRes.ok) {
           const rollsData = await rollsRes.json();
           setAvailableRolls(rollsData);
 
           // Derive unique buyers from available rolls
-          const buyerMap = new Map();
-          rollsData.forEach((r: any) => {
+          const buyerMap = new Map<string, BuyerRef>();
+          (rollsData as DispatchRoll[]).forEach((r) => {
             if (r.order?.buyer) {
               buyerMap.set(r.order.buyer.id, r.order.buyer);
             }
           });
           const buyersList = Array.from(buyerMap.values());
           setBuyers(buyersList);
-          if (buyersList.length > 0 && !selectedBuyerId) {
-            setSelectedBuyerId(buyersList[0].id);
+          if (buyersList.length > 0) {
+            // Functional update: keep a buyer the user already picked (this
+            // effect re-runs on realtime reloads and page changes).
+            setSelectedBuyerId((current) => current || buyersList[0].id);
           }
         }
 
@@ -157,6 +161,13 @@ export default function DispatchPage() {
   const eligibleRollsForBuyer = availableRolls.filter(
     (r) => r.order?.buyerId === selectedBuyerId
   );
+  const eligiblePageCount = Math.max(1, Math.ceil(eligibleRollsForBuyer.length / ELIGIBLE_PAGE_SIZE));
+  // A reload or a dispatch can shrink the list; never land past the end.
+  const currentEligiblePage = Math.min(eligiblePage, eligiblePageCount);
+  const pagedEligibleRolls = eligibleRollsForBuyer.slice(
+    (currentEligiblePage - 1) * ELIGIBLE_PAGE_SIZE,
+    currentEligiblePage * ELIGIBLE_PAGE_SIZE
+  );
 
   const toggleRoll = (rollId: string) => {
     setSelectedRollIds((prev) =>
@@ -176,7 +187,7 @@ export default function DispatchPage() {
   const handleScanRollOntoTruck = async (token: string) => {
     try {
       const res = await fetch(`/api/rolls/by-qr/${encodeURIComponent(token)}`);
-      let roll: any = null;
+      let roll: RollRow | DispatchRoll | null | undefined = null;
       if (res.ok) {
         roll = await res.json();
       } else {
@@ -203,7 +214,7 @@ export default function DispatchPage() {
           `Roll ${roll.rollNo} belongs to buyer '${roll.order?.buyer?.name || "Other"}', but truck is set for '${buyers.find((b) => b.id === selectedBuyerId)?.name}'. Switch buyer to load this roll?`
         );
         if (proceed) {
-          setSelectedBuyerId(roll.order.buyerId);
+          setSelectedBuyerId(roll.order.buyerId ?? "");
           setSelectedRollIds([roll.id]);
           showToast(`Switched buyer and scanned ${roll.rollNo} onto truck`);
         }
@@ -304,9 +315,9 @@ export default function DispatchPage() {
 
   // Built from the saved dispatch (server data), never from form state or
   // placeholder values: the buyer must only ever be sent real details.
-  const openDispatchWhatsApp = (disp: any) => {
-    const rolls: any[] = disp?.rolls ?? [];
-    const orders = new Map<string, any>();
+  const openDispatchWhatsApp = (disp: DispatchRow) => {
+    const rolls = disp?.rolls ?? [];
+    const orders = new Map<string, OrderRef>();
     for (const r of rolls) if (r.order?.id) orders.set(r.order.id, r.order);
     const list = [...orders.values()];
     const buyer = disp?.buyer ?? list[0]?.buyer;
@@ -320,8 +331,8 @@ export default function DispatchPage() {
       totalMetres: Math.round(rolls.reduce((acc, r) => acc + (r.lengthMetres || 0), 0) * 10) / 10,
       rollCount: rolls.length,
       truckNo: disp.truckNo,
-      trackingToken: list[0].trackingToken,
-      tracking: list.map((o) => ({ orderNo: o.orderNo, trackingToken: o.trackingToken })),
+      trackingToken: list[0].trackingToken ?? "",
+      tracking: list.map((o) => ({ orderNo: o.orderNo, trackingToken: o.trackingToken ?? "" })),
     });
     setWhatsAppTarget({ dispatchId: disp.id });
     setWhatsAppModalOpen(true);
@@ -403,6 +414,7 @@ export default function DispatchPage() {
                   value={selectedBuyerId}
                   onChange={(e) => {
                     setSelectedBuyerId(e.target.value);
+                    setEligiblePage(1);
                     setSelectedRollIds([]);
                   }}
                   error={formErrors.buyerId}
@@ -471,7 +483,7 @@ export default function DispatchPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {eligibleRollsForBuyer.map((roll) => {
+                    {pagedEligibleRolls.map((roll) => {
                       const isSelected = selectedRollIds.includes(roll.id);
                       return (
                         <TableRow
@@ -514,6 +526,11 @@ export default function DispatchPage() {
                     })}
                   </TableBody>
                 </Table>
+              )}
+              {!loading && eligibleRollsForBuyer.length > ELIGIBLE_PAGE_SIZE && (
+                <div className="pt-3">
+                  <Pager page={currentEligiblePage} pageSize={ELIGIBLE_PAGE_SIZE} total={eligibleRollsForBuyer.length} onPageChange={setEligiblePage} />
+                </div>
               )}
             </Card>
           </div>
@@ -581,7 +598,7 @@ export default function DispatchPage() {
                   <p className="text-[11px] text-slate-500">
                     Each order&apos;s GST invoice covers its full quantity and is raised once, with its first truck.
                     {toInvoice.length > 0
-                      ? ` This truck raises it for ${toInvoice.map((o) => o.orderNo).join(", ")}.`
+                      ? ` This truck raises it for ${toInvoice.map((o) => o?.orderNo).join(", ")}.`
                       : ordersOnTruck.length > 0
                         ? " Every order on this truck is already invoiced."
                         : ""}
@@ -630,7 +647,7 @@ export default function DispatchPage() {
               <TableBody>
                 {dispatches.map((disp) => {
                   const dispMetres = disp.rolls?.reduce(
-                    (acc: number, r: any) => acc + (r.lengthMetres || 0),
+                    (acc: number, r) => acc + (r.lengthMetres || 0),
                     0
                   );
                   const isEditing = editingDispatchId === disp.id;
@@ -710,29 +727,7 @@ export default function DispatchPage() {
         </Card>
       )}
 
-      {activeTab === "history" && dispatchTotal > DISPATCH_PAGE_SIZE && (
-        <div className="flex items-center justify-between gap-3 px-1 text-xs text-slate-500">
-          <span>
-            {(dispatchPage - 1) * DISPATCH_PAGE_SIZE + 1}–{Math.min(dispatchTotal, dispatchPage * DISPATCH_PAGE_SIZE)} of {dispatchTotal}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={dispatchPage <= 1} onClick={() => setDispatchPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <span className="tabular-nums">
-              Page {dispatchPage} of {Math.max(1, Math.ceil(dispatchTotal / DISPATCH_PAGE_SIZE))}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={dispatchPage >= Math.ceil(dispatchTotal / DISPATCH_PAGE_SIZE)}
-              onClick={() => setDispatchPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      {activeTab === "history" && dispatchTotal > DISPATCH_PAGE_SIZE && <Pager page={dispatchPage} pageSize={DISPATCH_PAGE_SIZE} total={dispatchTotal} onPageChange={setDispatchPage} />}
 
       {/* QR Scanner — mounted only once opened, so its chunk isn't fetched on page load */}
       {scannerOpen && (
@@ -745,12 +740,14 @@ export default function DispatchPage() {
       )}
 
       {/* WhatsApp Dispatch Confirmation Preview */}
-      <WhatsAppPreviewModal
-        isOpen={whatsAppModalOpen}
-        onClose={() => setWhatsAppModalOpen(false)}
-        payload={whatsAppPayload}
-        target={whatsAppTarget}
-      />
+      {whatsAppModalOpen && (
+        <WhatsAppPreviewModal
+          isOpen={whatsAppModalOpen}
+          onClose={() => setWhatsAppModalOpen(false)}
+          payload={whatsAppPayload}
+          target={whatsAppTarget}
+        />
+      )}
     </div>
   );
 }

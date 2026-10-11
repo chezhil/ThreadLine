@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Demo helper: keeps nudging real data through the real API so a screen
 // showing the dashboard / floor board / QC queue / dispatch visibly updates
 // live (via the socket.io push) without anyone touching a keyboard.

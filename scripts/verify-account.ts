@@ -47,6 +47,13 @@ async function main() {
     const cookie = a.cookie!;
     check("qc can sign in", !!cookie);
 
+    // The cleanup below restores this script's database; if BASE serves a
+    // different one, the server's qc user would be left with the test password.
+    const whoami = await call(cookie, "GET", "/api/me");
+    if (whoami.json?.profile?.id !== user.id) {
+      throw new Error(`BASE (${BASE}) uses a different database than DATABASE_URL — point both at the same one`);
+    }
+
     // ---- auth required everywhere -------------------------------------------
     for (const [m, p] of [["GET", "/api/me"], ["PATCH", "/api/me"], ["PATCH", "/api/me/preferences"], ["POST", "/api/me/password"], ["GET", "/api/me/sessions"], ["DELETE", "/api/me/sessions"], ["GET", "/api/me/activity"]]) {
       const r = await call(null, m, p, m === "GET" ? undefined : {});

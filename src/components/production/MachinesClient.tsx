@@ -5,6 +5,8 @@ import { machineEditSchema, machineSchema, machineStatusChangeSchema } from "@/l
 import { readApi, writeApi, type FieldErrors } from "./api";
 import type { FloorMachine, MachineResponse } from "./types";
 import { useProductionRealtime } from "./useProductionRealtime";
+import { Pager } from "@/components/ui";
+import { usePaged } from "@/lib/usePaged";
 
 const statuses = ["RUNNING", "IDLE", "BREAKDOWN", "MAINTENANCE"] as const;
 
@@ -45,6 +47,7 @@ export function MachinesClient() {
   }
 
   const visibleMachines = data?.machines.filter((machine) => machine.name.toLowerCase().includes(query.toLowerCase()) && (!statusFilter || machine.status === statusFilter)) ?? [];
+  const paged = usePaged(visibleMachines);
 
   return <div className="production-page">
     <h1>Machines</h1>
@@ -73,7 +76,8 @@ export function MachinesClient() {
         {!data && !loadError && <p className="production-loading" role="status">Loading machines…</p>}
         {data?.machines.length === 0 && <p>No machines yet. Add the first machine.</p>}
         {data && data.machines.length > 0 && visibleMachines.length === 0 && <p>No machines match these filters.</p>}
-        <div className="production-list">{visibleMachines.map((machine) => <MachineCard key={machine.id} machine={machine} onStatus={changeStatus} onChanged={refresh} />)}</div>
+        <div className="production-list">{paged.pageRows.map((machine) => <MachineCard key={machine.id} machine={machine} onStatus={changeStatus} onChanged={refresh} />)}</div>
+        {paged.showPager && <Pager {...paged.pagerProps} />}
       </section>
     </div>
   </div>;

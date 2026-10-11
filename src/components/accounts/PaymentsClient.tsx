@@ -163,6 +163,7 @@ export function PaymentsClient() {
                 },
               ]}
               rows={invoices}
+              pageSize={false}
               keyFor={(i) => i.id}
               emptyState={
                 <EmptyState

@@ -261,7 +261,7 @@ export async function GET(req: NextRequest) {
       byYarnLot,
       byDefectType,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Failed to generate defect analytics:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

@@ -3,16 +3,17 @@
 import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRealtimeEvent } from "@/lib/useRealtime";
+import { useFlash } from "@/lib/useFlash";
 import { RealtimeEvents } from "@/lib/realtime";
 import { Button } from "@/components/quality/ui/Button";
+import { Pager } from "@/components/ui";
 import { Badge } from "@/components/quality/ui/Badge";
 import { Card } from "@/components/quality/ui/Card";
-import { Input } from "@/components/quality/ui/Input";
+
 import { Select } from "@/components/quality/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/quality/ui/Table";
 import { EmptyState } from "@/components/quality/ui/EmptyState";
 import { Drawer } from "@/components/quality/ui/Drawer";
-import { RollQrLabel } from "@/components/rolls/RollQrLabel";
 import { enqueueOfflineMutation, newMutationId } from "@/lib/offline-queue";
 import { DEFECT_TYPES } from "@/lib/validation/roll";
 import {
@@ -22,25 +23,38 @@ import {
   XCircle,
   Clock,
   Search,
-  Filter,
   Printer,
   ChevronRight,
   ShieldCheck,
   CheckSquare,
 } from "lucide-react";
 import Link from "next/link";
+import type { RollRow } from "@/lib/quality/types";
 
 // The QR decoder (jsqr) and camera wiring only matter once the scan sheet is
 // open, so keep them out of this page's initial bundle.
 const QrScannerModal = dynamic(() => import("@/components/rolls/QrScannerModal").then((m) => m.QrScannerModal), { ssr: false });
+// The label pulls in the qrcode encoder; it's only shown in the print modal.
+const RollQrLabel = dynamic(() => import("@/components/rolls/RollQrLabel").then((m) => m.RollQrLabel), { ssr: false });
+
+const PAGE_SIZE = 50;
+type StatusCounts = Partial<Record<"PENDING" | "PASS" | "REWORK" | "REJECT", number>>;
 
 export default function QcQueuePage() {
-  const [rolls, setRolls] = useState<any[]>([]);
+  const [rolls, setRolls] = useState<RollRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  // The queue is paged on the server (it was every roll in the mill, ~3 MB
+  // at 1,500 rolls); status tiles come from server-side counts.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<StatusCounts>({});
+  const [liveTick, setLiveTick] = useState(0);
+  const countsFlash = useFlash(liveTick);
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [selectedRoll, setSelectedRoll] = useState<any | null>(null);
+  const [selectedRoll, setSelectedRoll] = useState<RollRow | null>(null);
   const [isInspectDrawerOpen, setIsInspectDrawerOpen] = useState(false);
   const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
 
@@ -56,13 +70,26 @@ export default function QcQueuePage() {
   const [reloadKey, setReloadKey] = useState(0);
   const fetchRolls = () => setReloadKey((k) => k + 1);
 
+  // A filter change starts again from page 1, never past the end of a
+  // narrower result set.
+  const chooseStatus = (next: string) => { setStatusFilter(next); setPage(1); };
   useEffect(() => {
+    const timer = setTimeout(() => { setDebouncedSearch(searchQuery.trim()); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), withCounts: "1" });
+    if (statusFilter !== "ALL") params.set("qcStatus", statusFilter);
+    if (debouncedSearch) params.set("search", debouncedSearch);
     const load = async () => {
       try {
-        const res = await fetch("/api/rolls");
+        const res = await fetch(`/api/rolls?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
-          setRolls(data);
+          setRolls(data.rolls);
+          setTotal(data.total);
+          setCounts(data.counts ?? {});
         }
       } catch (err) {
         console.warn("Failed to fetch rolls (might be offline):", err);
@@ -71,12 +98,14 @@ export default function QcQueuePage() {
       }
     };
     load();
-  }, [reloadKey]);
+  }, [reloadKey, page, statusFilter, debouncedSearch]);
   useRealtimeEvent(RealtimeEvents.RollCreated, () => {
     fetchRolls();
+    setLiveTick((t) => t + 1);
   });
   useRealtimeEvent(RealtimeEvents.QcCompleted, () => {
     fetchRolls();
+    setLiveTick((t) => t + 1);
   });
 
   const showToast = (msg: string) => {
@@ -111,9 +140,9 @@ export default function QcQueuePage() {
     }
   };
 
-  const openInspectionDrawer = (roll: any) => {
+  const openInspectionDrawer = (roll: RollRow) => {
     setSelectedRoll(roll);
-    setQcResult(roll.qcStatus === "PENDING" ? "PASS" : roll.qcStatus);
+    setQcResult(roll.qcStatus === "PENDING" ? "PASS" : (roll.qcStatus as "PASS" | "REWORK" | "REJECT"));
     setSelectedDefects([]);
     setNotes("");
     setFormErrors({});
@@ -242,23 +271,12 @@ export default function QcQueuePage() {
     }
   };
 
-  const filteredRolls = rolls.filter((roll) => {
-    if (statusFilter !== "ALL" && roll.qcStatus !== statusFilter) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const matchRoll = roll.rollNo.toLowerCase().includes(q);
-      const matchOrder = roll.order?.orderNo?.toLowerCase().includes(q);
-      const matchMachine = roll.machine?.name?.toLowerCase().includes(q);
-      const matchLot = roll.yarnLot?.lotNo?.toLowerCase().includes(q);
-      return matchRoll || matchOrder || matchMachine || matchLot;
-    }
-    return true;
-  });
-
-  const pendingCount = rolls.filter((r) => r.qcStatus === "PENDING").length;
-  const passCount = rolls.filter((r) => r.qcStatus === "PASS").length;
-  const reworkCount = rolls.filter((r) => r.qcStatus === "REWORK").length;
-  const rejectCount = rolls.filter((r) => r.qcStatus === "REJECT").length;
+  // Status, search and paging are applied by the server.
+  const filteredRolls = rolls;
+  const pendingCount = counts.PENDING ?? 0;
+  const passCount = counts.PASS ?? 0;
+  const reworkCount = counts.REWORK ?? 0;
+  const rejectCount = counts.REJECT ?? 0;
 
   return (
     <div className="space-y-6">
@@ -293,8 +311,8 @@ export default function QcQueuePage() {
       {/* Metrics Counter Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <button
-          onClick={() => setStatusFilter("PENDING")}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          onClick={() => chooseStatus("PENDING")}
+          className={`p-4 rounded-xl border text-left transition-all ${countsFlash ? "animate-flash-update " : ""}${
             statusFilter === "PENDING"
               ? "bg-slate-900 text-white border-slate-900 shadow-md"
               : "bg-white text-slate-800 border-slate-200/80 hover:border-slate-300"
@@ -308,8 +326,8 @@ export default function QcQueuePage() {
         </button>
 
         <button
-          onClick={() => setStatusFilter("PASS")}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          onClick={() => chooseStatus("PASS")}
+          className={`p-4 rounded-xl border text-left transition-all ${countsFlash ? "animate-flash-update " : ""}${
             statusFilter === "PASS"
               ? "bg-emerald-700 text-white border-emerald-700 shadow-md"
               : "bg-white text-slate-800 border-slate-200/80 hover:border-slate-300"
@@ -323,8 +341,8 @@ export default function QcQueuePage() {
         </button>
 
         <button
-          onClick={() => setStatusFilter("REWORK")}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          onClick={() => chooseStatus("REWORK")}
+          className={`p-4 rounded-xl border text-left transition-all ${countsFlash ? "animate-flash-update " : ""}${
             statusFilter === "REWORK"
               ? "bg-amber-600 text-white border-amber-600 shadow-md"
               : "bg-white text-slate-800 border-slate-200/80 hover:border-slate-300"
@@ -338,8 +356,8 @@ export default function QcQueuePage() {
         </button>
 
         <button
-          onClick={() => setStatusFilter("REJECT")}
-          className={`p-4 rounded-xl border text-left transition-all ${
+          onClick={() => chooseStatus("REJECT")}
+          className={`p-4 rounded-xl border text-left transition-all ${countsFlash ? "animate-flash-update " : ""}${
             statusFilter === "REJECT"
               ? "bg-rose-700 text-white border-rose-700 shadow-md"
               : "bg-white text-slate-800 border-slate-200/80 hover:border-slate-300"
@@ -370,7 +388,7 @@ export default function QcQueuePage() {
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => chooseStatus(e.target.value)}
               className="text-xs py-2 w-full sm:w-36"
             >
               <option value="ALL">All Statuses</option>
@@ -384,7 +402,7 @@ export default function QcQueuePage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setStatusFilter("ALL")}
+                onClick={() => chooseStatus("ALL")}
                 className="text-xs text-slate-500"
               >
                 Clear
@@ -407,7 +425,7 @@ export default function QcQueuePage() {
             title="No rolls found"
             description="No fabric rolls match your selected filter or search query."
             action={
-              <Button size="sm" variant="outline" onClick={() => setStatusFilter("ALL")}>
+              <Button size="sm" variant="outline" onClick={() => chooseStatus("ALL")}>
                 View All Rolls
               </Button>
             }
@@ -499,6 +517,8 @@ export default function QcQueuePage() {
           </Table>
         )}
       </Card>
+
+      {total > PAGE_SIZE && <Pager page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />}
 
       {/* QC Inspection Drawer */}
       <Drawer

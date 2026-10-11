@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Laptop, LogOut, Smartphone } from "lucide-react";
-import { Button, Input } from "@/components/ui";
+import { Button, Input, Pager } from "@/components/ui";
+import { usePaged } from "@/lib/usePaged";
 import { signOut } from "@/components/layout/sign-out";
 import { firstError, postJson, useApi } from "@/lib/useApi";
 import { dateTimeIN } from "@/lib/accounts/format";
@@ -134,12 +135,13 @@ function Sessions() {
 
   const rows = data?.sessions ?? [];
   const others = rows.filter((s) => !s.current);
+  const paged = usePaged(rows, 10);
 
   return (
     <Section title="Where you're signed in" description="Sessions last 7 days. Sign out any device you don't recognise.">
       {error && <p className="px-5 py-4 text-[13px] text-red-700">Couldn&apos;t load your sessions. {error}</p>}
       {!data && !error && <p className="px-5 py-4 text-[13px] text-gray-500">Loading…</p>}
-      {rows.map((s) => {
+      {paged.pageRows.map((s) => {
         const d = describeDevice(s.userAgent);
         const Icon = d.mobile ? Smartphone : Laptop;
         return (
@@ -160,6 +162,11 @@ function Sessions() {
           </div>
         );
       })}
+      {paged.showPager && (
+        <div className="px-5 py-3">
+          <Pager {...paged.pagerProps} />
+        </div>
+      )}
       {note && (
         <div className="px-5 py-3">
           <FormNote kind="error">{note}</FormNote>

@@ -2,7 +2,10 @@
 // Never edit an existing model's fields without flagging it in AI_NOTES.md — only add additively.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // Queries go through node-postgres (src/lib/db.ts): one round trip each over
+  // Supabase's transaction pooler, where the built-in engine needs ~5.
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {

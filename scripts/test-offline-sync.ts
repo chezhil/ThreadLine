@@ -175,7 +175,7 @@ async function main() {
     );
 
     console.log("   -> Enqueuing QC Inspection: Roll 2 -> REWORK (uneven_weave)");
-    const m2 = await enqueueOfflineMutation(
+    await enqueueOfflineMutation(
       "qc_entry",
       `/api/rolls/${roll2.id}/qc`,
       "POST",
@@ -183,7 +183,7 @@ async function main() {
     );
 
     console.log("   -> Enqueuing QC Inspection: Roll 3 -> REJECT (hole)");
-    const m3 = await enqueueOfflineMutation(
+    await enqueueOfflineMutation(
       "qc_entry",
       `/api/rolls/${roll3.id}/qc`,
       "POST",
@@ -301,7 +301,7 @@ async function main() {
     if (!replayedQc1.ok) {
       throw new Error(`QC 1 re-submission failed with HTTP ${replayedQc1.status}`);
     }
-    const qc1Data = await replayedQc1.json();
+    await replayedQc1.json();
     console.log(`   ✓ QC 1 idempotent response accepted (HTTP 200).`);
 
     const replayedDispatch = await fetch(`${BASE}/api/dispatches`, {
@@ -312,7 +312,7 @@ async function main() {
     if (!replayedDispatch.ok) {
       throw new Error(`Dispatch re-submission failed with HTTP ${replayedDispatch.status}`);
     }
-    const dispatchData = await replayedDispatch.json();
+    await replayedDispatch.json();
     console.log(`   ✓ Dispatch idempotent response accepted (HTTP 200).`);
 
     // Verify DB count still 1

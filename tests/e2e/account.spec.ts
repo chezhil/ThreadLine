@@ -4,6 +4,10 @@ import { loginAs, OWNER } from "./auth";
 // App-shell and account features: brand link, collapsible sidebar, account
 // menu, profile & settings, theme, command menu, shortcuts, tab icon.
 
+/** Resolves with the next debounced preference save from the app itself. */
+const nextPrefSave = (page: Page) =>
+  page.waitForResponse((r) => r.url().includes("/api/me/preferences") && r.request().method() === "PATCH");
+
 const savePrefs = (page: Page, prefs: Record<string, unknown>) =>
   page.evaluate(
     (body) => fetch("/api/me/preferences", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.status),
@@ -40,9 +44,10 @@ test("the sidebar collapses to icons, stays collapsed after a reload, and expand
   await expect(aside).toHaveAttribute("data-collapsed", "false");
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(aside).toHaveAttribute("data-collapsed", "true");
+  const saved = nextPrefSave(page);
   await expect(aside.getByText("Orders & Buyers")).toHaveCount(0);
   await expect(aside.getByRole("link", { name: /Orders & Buyers/ })).toBeVisible(); // still reachable as an icon
-  await page.waitForTimeout(700); // preference save is debounced
+  expect((await saved).status()).toBe(200);
   await page.reload();
   await ready(page);
   await expect(page.locator("aside")).toHaveAttribute("data-collapsed", "true");
@@ -94,11 +99,14 @@ test("settings tabs are linkable and switch without a reload", async ({ page }) 
 test("dark theme applies at once and survives a reload", async ({ page }) => {
   await page.goto("/profile?tab=preferences");
   const frame = page.locator("[data-theme]").first();
+  // Wait for the debounced save itself, not a fixed delay: over a remote
+  // database it can take longer than the debounce.
+  const saved = nextPrefSave(page);
   await page.getByRole("radio", { name: /Dark/ }).first().click();
   await expect(frame).toHaveAttribute("data-theme", "dark");
   const bg = await page.evaluate(() => getComputedStyle(document.querySelector("[data-theme]")!).backgroundColor);
   expect(bg).toBe("rgb(5, 5, 5)");
-  await page.waitForTimeout(700);
+  expect((await saved).status()).toBe(200);
   await page.reload();
   await expect(page.locator("[data-theme]").first()).toHaveAttribute("data-theme", "dark");
 });

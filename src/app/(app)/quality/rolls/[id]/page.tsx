@@ -8,24 +8,20 @@ import { Card } from "@/components/quality/ui/Card";
 import { Drawer } from "@/components/quality/ui/Drawer";
 import { Input } from "@/components/quality/ui/Input";
 import { Select } from "@/components/quality/ui/Select";
-import { RollQrLabel } from "@/components/rolls/RollQrLabel";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import {
   ArrowLeft,
   Printer,
   CheckSquare,
-  Truck,
-  Layers,
-  Factory,
-  Clock,
-  Sparkles,
   AlertCircle,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import type { QcRecord, RollRow } from "@/lib/quality/types";
+
+// The label pulls in the qrcode encoder; it's only shown in the print modal.
+const RollQrLabel = dynamic(() => import("@/components/rolls/RollQrLabel").then((m) => m.RollQrLabel), { ssr: false });
 
 export default function RollDetailPage() {
   const params = useParams();
@@ -34,7 +30,7 @@ export default function RollDetailPage() {
   const rollId = params.id as string;
   const qrTokenFromQuery = searchParams.get("token");
 
-  const [roll, setRoll] = useState<any | null>(null);
+  const [roll, setRoll] = useState<RollRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -65,8 +61,8 @@ export default function RollDetailPage() {
         }
         const data = await res.json();
         setRoll(data);
-      } catch (err: any) {
-        setError(err.message || "Failed to load roll details");
+      } catch (err) {
+        setError((err instanceof Error && err.message) || "Failed to load roll details");
       } finally {
         setLoading(false);
       }
@@ -82,6 +78,7 @@ export default function RollDetailPage() {
   async function deleteRoll() {
     setActionError(null);
     setActionBusy(true);
+    if (!roll) return;
     const res = await fetch(`/api/rolls/${roll.id}`, { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
     setActionBusy(false);
@@ -339,7 +336,7 @@ export default function RollDetailPage() {
           <p className="text-xs text-slate-400 py-3">No QC inspections recorded yet. Status is PENDING.</p>
         ) : (
           <div className="space-y-3">
-            {roll.qcRecords.map((rec: any, idx: number) => (
+            {roll.qcRecords.map((rec, idx) => (
               <QcRecordRow key={rec.id || idx} rec={rec} rollId={roll.id} canReverse={!roll.dispatchId} onReversed={refetch} />
             ))}
           </div>
@@ -377,7 +374,10 @@ export default function RollDetailPage() {
   );
 }
 
-function EditRollForm({ roll, onSaved }: { roll: any; onSaved: () => void }) {
+// The slice of /api/rolls/mint-options this form reads.
+type WorkOrderLots = { order?: { id: string }; yarnLots?: { id: string; lotNo: string; yarnType: string }[] };
+
+function EditRollForm({ roll, onSaved }: { roll: RollRow; onSaved: () => void }) {
   const [shift, setShift] = useState(roll.shift ?? "");
   const [yarnLotId, setYarnLotId] = useState(roll.yarnLotId ?? "");
   const [lengthMetres, setLengthMetres] = useState(String(roll.lengthMetres ?? ""));
@@ -392,7 +392,7 @@ function EditRollForm({ roll, onSaved }: { roll: any; onSaved: () => void }) {
       const res = await fetch("/api/rolls/mint-options");
       if (!res.ok || cancelled) return;
       const data = await res.json().catch(() => null);
-      const forThisOrder = (data?.workOrders ?? []).filter((wo: any) => wo.order?.id === roll.order?.id);
+      const forThisOrder = ((data?.workOrders ?? []) as WorkOrderLots[]).filter((wo) => wo.order?.id === roll.order?.id);
       const byId = new Map<string, { id: string; lotNo: string; yarnType: string }>();
       for (const wo of forThisOrder) for (const l of wo.yarnLots ?? []) byId.set(l.id, l);
       if (!byId.has(roll.yarnLotId) && roll.yarnLot) {
@@ -444,7 +444,7 @@ function EditRollForm({ roll, onSaved }: { roll: any; onSaved: () => void }) {
   );
 }
 
-function QcRecordRow({ rec, rollId, canReverse, onReversed }: { rec: any; rollId: string; canReverse: boolean; onReversed: () => void }) {
+function QcRecordRow({ rec, rollId, canReverse, onReversed }: { rec: QcRecord; rollId: string; canReverse: boolean; onReversed: () => void }) {
   const [reversing, setReversing] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);

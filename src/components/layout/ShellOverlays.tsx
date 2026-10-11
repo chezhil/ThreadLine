@@ -7,7 +7,7 @@ import { RealtimeEvents } from "@/lib/realtime";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { statusBadgeClass } from "@/lib/tokens";
 import { severityStatus } from "@/lib/accounts/alert-format";
-import { CommandPalette } from "./CommandPalette";
+import dynamic from "next/dynamic";
 import { useShell } from "./ShellProvider";
 import { goTargets, isTypingTarget } from "./shortcuts";
 import { beep } from "./sound";
@@ -15,12 +15,16 @@ import { beep } from "./sound";
 // Everything in the shell that floats above the page: the command menu, the
 // shortcuts help, live-alert toasts, the thin route-change progress bar, and
 // the global keyboard handler that drives them.
+// The command menu (and its order search) loads the first time it's opened.
+const CommandPalette = dynamic(() => import("./CommandPalette").then((m) => m.CommandPalette), { ssr: false });
+
 export function ShellOverlays({ role }: { role: Role }) {
+  const { paletteOpen } = useShell();
   return (
     <>
       <RouteProgress />
       <GlobalKeys role={role} />
-      <CommandPalette role={role} />
+      {paletteOpen && <CommandPalette role={role} />}
       <ShortcutsDialog role={role} />
       <ToastHost />
     </>

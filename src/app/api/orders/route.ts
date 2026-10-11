@@ -50,6 +50,17 @@ export async function GET(req: NextRequest) {
       : {}),
   };
 
+  // Pickers ("link this expense to an order") need only a label per order,
+  // not the full rows — a few KB instead of hundreds at 500+ orders.
+  if (sp.get("view") === "options") {
+    const options = await db.order.findMany({
+      where,
+      select: { id: true, orderNo: true, buyer: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json({ orders: options });
+  }
+
   const total = await db.order.count({ where });
 
   // Urgency needs a bucket (open orders before done ones) then a tiebreak —

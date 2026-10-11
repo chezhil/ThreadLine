@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Button, Card, CardHeader, EmptyState, Input, Select } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, Input, Pager, Select } from "@/components/ui";
 import { postJson, useApi } from "@/lib/useApi";
 import { useRealtimeEvent } from "@/lib/useRealtime";
 import { RealtimeEvents } from "@/lib/realtime";
@@ -29,6 +29,8 @@ interface AlertDeliveryRow {
   receipt: string | null;
 }
 
+const ALERTS_PAGE_SIZE = 25;
+
 export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
   const [show, setShow] = useState("unread");
   const [severity, setSeverity] = useState("");
@@ -45,7 +47,11 @@ export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
     const needle = q.trim().toLowerCase();
     return all.filter((n) => (!kind || alertKind(n.type) === kind) && (!needle || n.message.toLowerCase().includes(needle)));
   }, [all, kind, q]);
-  const preview = rows.find((n) => n.id === previewId) ?? rows[0] ?? null;
+  // Only the current page's cards hit the DOM (up to 200 alerts load at once).
+  const [requestedPage, setPage] = useState(1);
+  const page = Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / ALERTS_PAGE_SIZE)));
+  const pagedRows = rows.slice((page - 1) * ALERTS_PAGE_SIZE, page * ALERTS_PAGE_SIZE);
+  const preview = rows.find((n) => n.id === previewId) ?? pagedRows[0] ?? null;
 
   async function setRead(ids: string[], read: boolean) {
     await postJson("/api/alerts", { ids, read }, "PATCH");
@@ -72,13 +78,13 @@ export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
 
       <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-[1fr_auto_auto_auto]">
         <div className="sm:col-span-3 xl:col-span-1">
-          <Input aria-label="Search alerts" placeholder="Search alert text" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Input aria-label="Search alerts" placeholder="Search alert text" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         </div>
-        <Select aria-label="Show" value={show} onChange={(e) => setShow(e.target.value)} options={[{ value: "unread", label: "Unread" }, { value: "all", label: "All" }]} />
+        <Select aria-label="Show" value={show} onChange={(e) => { setShow(e.target.value); setPage(1); }} options={[{ value: "unread", label: "Unread" }, { value: "all", label: "All" }]} />
         <Select
           aria-label="Severity"
           value={severity}
-          onChange={(e) => setSeverity(e.target.value)}
+          onChange={(e) => { setSeverity(e.target.value); setPage(1); }}
           options={[
             { value: "", label: "Any severity" },
             { value: "critical", label: "Critical" },
@@ -89,7 +95,7 @@ export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
         <Select
           aria-label="Type"
           value={kind}
-          onChange={(e) => setKind(e.target.value)}
+          onChange={(e) => { setKind(e.target.value); setPage(1); }}
           options={[{ value: "", label: "Any type" }, ...kinds.map((k) => ({ value: k, label: alertKindLabel(k) }))]}
         />
       </div>
@@ -103,7 +109,7 @@ export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
             {rows.length === 0 ? (
               <EmptyState title={show === "unread" ? "No unread alerts" : "No alerts"} description="New alerts appear here the moment any module raises them." />
             ) : (
-              rows.map((n) => (
+              pagedRows.map((n) => (
                 <Card
                   key={n.id}
                   className={`flex cursor-pointer flex-col gap-2 sm:flex-row sm:items-start ${preview?.id === n.id ? "ring-2 ring-brand/40" : ""} ${n.read ? "opacity-70" : ""}`}
@@ -132,6 +138,9 @@ export function AlertsClient({ showOutbox = false }: { showOutbox?: boolean }) {
                   </Button>
                 </Card>
               ))
+            )}
+            {rows.length > ALERTS_PAGE_SIZE && (
+              <Pager page={page} pageSize={ALERTS_PAGE_SIZE} total={rows.length} onPageChange={setPage} />
             )}
           </div>
 

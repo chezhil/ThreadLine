@@ -17,7 +17,7 @@ import { ROLE_HOME } from "@/lib/role-home";
 // Two bands, as in the Stitch shell: a white control bar (where am I, is the
 // floor live, what time is it at the mill, who am I) and a quieter strip with
 // the breadcrumb trail and the owner's shortcut to the assistant.
-export function AppHeader({ role, userId }: { role: Role; userId: string }) {
+export function AppHeader({ role, userId, fileBackups }: { role: Role; userId: string; fileBackups: boolean }) {
   const pathname = usePathname();
   const { setPaletteOpen } = useShell();
   const section = navItemForPath(pathname);
@@ -58,7 +58,7 @@ export function AppHeader({ role, userId }: { role: Role; userId: string }) {
             <LiveClock className="text-[13px] font-medium text-foreground" />
           </span>
           <span className="hidden h-4 w-px bg-border-strong lg:block" aria-hidden="true" />
-          <SyncStatus canBackup={role === "owner"} userId={userId} />
+          <SyncStatus canBackup={role === "owner" && fileBackups} userId={userId} />
           <button
             type="button"
             onClick={() => setPaletteOpen(true)}

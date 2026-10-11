@@ -9,8 +9,11 @@ import { RealtimeEvents, type DataChange } from "@/lib/realtime";
 import { dateIN, dateTimeIN, inr } from "@/lib/accounts/format";
 import { ErrorNote, Loading } from "@/components/accounts/Stat";
 import { OrderForm, type PickBuyer, type PickYarnType } from "./OrderForm";
-import { WhatsAppPreviewModal } from "@/components/dispatch/WhatsAppPreviewModal";
+import dynamic from "next/dynamic";
 import type { DispatchWhatsAppPayload } from "@/lib/alerts/whatsapp-format";
+
+// The preview/send sheet only matters once opened; keep it out of the page's first load.
+const WhatsAppPreviewModal = dynamic(() => import("@/components/dispatch/WhatsAppPreviewModal").then((m) => m.WhatsAppPreviewModal), { ssr: false });
 
 interface YarnLot {
   id: string;
@@ -371,12 +374,14 @@ export function OrderDetailClient({ orderId }: { orderId: string }) {
         {editing && <EditOrder order={o} onSaved={() => { setEditing(false); order.refetch(); }} />}
       </Drawer>
 
-      <WhatsAppPreviewModal
-        isOpen={whatsAppModalOpen}
-        onClose={() => setWhatsAppModalOpen(false)}
-        payload={whatsApp?.payload ?? null}
-        target={whatsApp?.target ?? null}
-      />
+      {whatsAppModalOpen && (
+        <WhatsAppPreviewModal
+          isOpen={whatsAppModalOpen}
+          onClose={() => setWhatsAppModalOpen(false)}
+          payload={whatsApp?.payload ?? null}
+          target={whatsApp?.target ?? null}
+        />
+      )}
     </div>
   );
 }

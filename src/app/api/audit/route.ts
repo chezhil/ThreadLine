@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       ? { at: { ...(from ? { gte: dayRange(from).start } : {}), ...(to ? { lt: dayRange(to).end } : {}) } }
       : {}),
     ...(q
-      ? { OR: [{ entityId: { contains: q } }, { oldValue: { contains: q } }, { newValue: { contains: q } }] }
+      ? { OR: [{ entityId: { contains: q, mode: "insensitive" } }, { oldValue: { contains: q, mode: "insensitive" } }, { newValue: { contains: q, mode: "insensitive" } }] }
       : {}),
   };
 

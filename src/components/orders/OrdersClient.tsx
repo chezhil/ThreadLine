@@ -105,6 +105,7 @@ export function OrdersClient() {
               { header: "Status", render: (o) => <Badge status={o.status} /> },
             ]}
             rows={rows}
+            pageSize={false}
             keyFor={(o) => o.id}
             emptyState={
               <EmptyState

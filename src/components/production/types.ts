@@ -56,6 +56,15 @@ export type WorkOrderResponse = {
   machines: ProductionMachine[];
 };
 
+/** GET /api/work-orders?page=… — one page of work orders plus every open one
+ * (for the "record output" dropdown). */
+export type PagedWorkOrderResponse = WorkOrderResponse & {
+  activeWorkOrders: { id: string; stage: string; order: { orderNo: string }; machine: { name: string } }[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
 export type ProductionLogRow = {
   id: string;
   shift: string;

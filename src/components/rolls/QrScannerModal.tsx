@@ -27,20 +27,31 @@ export function QrScannerModal({
   const animFrameId = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Bumped on every stop so a getUserMedia that resolves after the modal closed
+  // (or the effect re-ran) releases its stream instead of leaving the camera on.
+  const startToken = useRef(0);
+
   const startCamera = async () => {
+    const myToken = ++startToken.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       });
+      if (myToken !== startToken.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       setCameraError(null);
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute("playsinline", "true");
         await videoRef.current.play();
-        requestAnimationFrame(tick);
+        if (myToken !== startToken.current) return;
+        animFrameId.current = requestAnimationFrame(tick);
       }
-    } catch (err: any) {
+    } catch (err) {
+      if (myToken !== startToken.current) return;
       console.warn("Camera access failed:", err);
       setCameraError("Camera unavailable or permission denied. Use manual input.");
       setMode("manual");
@@ -48,6 +59,7 @@ export function QrScannerModal({
   };
 
   const stopCamera = () => {
+    startToken.current++;
     if (animFrameId.current) {
       cancelAnimationFrame(animFrameId.current);
       animFrameId.current = null;
@@ -125,6 +137,8 @@ export function QrScannerModal({
     return () => {
       stopCamera();
     };
+    // startCamera/stopCamera only touch refs and setters, so re-running on their identity would restart the camera every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mode]);
 
   if (!isOpen) return null;

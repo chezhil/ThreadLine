@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { whatsappConfigured } from "@/lib/alerts/whatsapp-cloud";
 
 const startTime = Date.now();
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   let dbHealthy = false;
 
   // 1. Check database connectivity

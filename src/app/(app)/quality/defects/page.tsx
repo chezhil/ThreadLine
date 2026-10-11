@@ -2,24 +2,36 @@
 
 import React, { useEffect, useState } from "react";
 import { Card } from "@/components/quality/ui/Card";
-import { Badge } from "@/components/quality/ui/Badge";
+
 import { Select } from "@/components/quality/ui/Select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/quality/ui/Table";
 import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
-  HelpCircle,
-  TrendingDown,
-  Factory,
-  Layers,
-  Clock,
   Sparkles,
-  BarChart3,
 } from "lucide-react";
 
+// Shape of GET /api/analytics/defects.
+interface DefectAnalytics {
+  callouts: string[];
+  summary: {
+    totalInspected: number;
+    totalPass: number;
+    totalRework: number;
+    totalReject: number;
+    passRate: number;
+    reworkRate: number;
+    rejectRate: number;
+  };
+  byMachine: { id: string; name: string; type: string; total: number; pass: number; rework: number; reject: number; rejectRate: number; shareOfTotalRejects: number }[];
+  byShift: { shift: string; total: number; pass: number; reject: number; rejectRate: number }[];
+  byYarnLot: { id: string; lotNo: string; yarnTypeName: string; supplierName: string; total: number; reject: number; rejectRate: number }[];
+  byDefectType: { type: string; label: string; count: number; percentage: number }[];
+}
+
 export default function DefectAnalyticsPage() {
-  const [data, setData] = useState<any | null>(null);
+  const [data, setData] = useState<DefectAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState("30");
 
@@ -81,7 +93,7 @@ export default function DefectAnalyticsPage() {
                 Root-Cause Intelligence (Computed from Real Inspection Records)
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {data.callouts.map((callout: string, idx: number) => (
+                {data.callouts.map((callout, idx) => (
                   <div
                     key={idx}
                     className="flex items-start gap-2.5 p-3 rounded-xl bg-white border border-amber-200/60 shadow-2xs"
@@ -172,7 +184,7 @@ export default function DefectAnalyticsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.byMachine.map((m: any) => {
+                {data.byMachine.map((m) => {
                   const isHighReject = m.rejectRate > 20 || m.shareOfTotalRejects > 40;
                   return (
                     <TableRow
@@ -234,7 +246,7 @@ export default function DefectAnalyticsPage() {
               subtitle="Distribution of identified defect types"
             >
               <div className="space-y-3 pt-1">
-                {data.byDefectType.map((d: any) => (
+                {data.byDefectType.map((d) => (
                   <div key={d.type} className="space-y-1">
                     <div className="flex justify-between text-xs">
                       <span className="font-bold text-slate-800">{d.label}</span>
@@ -269,7 +281,7 @@ export default function DefectAnalyticsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.byShift.map((s: any) => (
+                  {data.byShift.map((s) => (
                     <TableRow key={s.shift}>
                       <TableCell className="font-bold text-slate-900">{s.shift}</TableCell>
                       <TableCell>{s.total}</TableCell>
@@ -302,7 +314,7 @@ export default function DefectAnalyticsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.byYarnLot.map((y: any) => (
+                {data.byYarnLot.map((y) => (
                   <TableRow key={y.id}>
                     <TableCell className="font-bold text-slate-900">{y.lotNo}</TableCell>
                     <TableCell className="text-slate-700">{y.yarnTypeName}</TableCell>

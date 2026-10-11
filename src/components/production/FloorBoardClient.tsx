@@ -1,9 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { RealtimeEvents } from "@/lib/realtime";
+import { useRealtimeEvent } from "@/lib/useRealtime";
 import { readApi } from "./api";
 import type { MachineResponse } from "./types";
 import { useProductionRealtime } from "./useProductionRealtime";
+import { Pager } from "@/components/ui";
+import { usePaged } from "@/lib/usePaged";
+
+const RISK_PAGE_SIZE = 10;
 
 export function FloorBoardClient() {
   const [data, setData] = useState<MachineResponse | null>(null);
@@ -13,6 +19,18 @@ export function FloorBoardClient() {
   }, []);
   useEffect(refresh, [refresh]);
   useProductionRealtime(refresh);
+
+  // Same live cue as the owner dashboard's loom tiles: the machine a push
+  // was about briefly flashes, so an update on a wall screen isn't missed.
+  const [flashMachineId, setFlashMachineId] = useState<string | null>(null);
+  useRealtimeEvent<{ machineId?: string }>(RealtimeEvents.MachineStatus, (payload) => setFlashMachineId(payload?.machineId ?? null));
+  useEffect(() => {
+    if (!flashMachineId) return;
+    const timer = setTimeout(() => setFlashMachineId(null), 1100);
+    return () => clearTimeout(timer);
+  }, [flashMachineId]);
+
+  const risks = usePaged(data?.delayRisks ?? [], RISK_PAGE_SIZE);
 
   return <div className="production-page">
     <h1>Live floor board</h1>
@@ -24,7 +42,7 @@ export function FloorBoardClient() {
       {data?.machines.map((machine) => {
         const current = machine.currentWorkOrder;
         const percent = current ? Math.min(100, Math.round(current.producedQty / current.plannedQty * 100)) : 0;
-        return <article key={machine.id} className="production-panel production-status" data-status={machine.status}>
+        return <article key={machine.id} className={`production-panel production-status${machine.id === flashMachineId ? " animate-flash-update" : ""}`} data-status={machine.status}>
           <h2>{machine.name}</h2>
           <p><strong>{machine.status}</strong> · {machine.type}</p>
           <p>Today: <strong>{machine.todayMetres} m</strong></p>
@@ -40,10 +58,11 @@ export function FloorBoardClient() {
       <section className="production-panel">
         <h2>Orders at delay risk</h2>
         {!data?.delayRisks.length && <p>No current delay risks.</p>}
-        <div className="production-list">{data?.delayRisks.map((risk) => <article key={risk.orderId}>
+        <div className="production-list">{risks.pageRows.map((risk) => <article key={risk.orderId}>
           <strong>{risk.orderNo}</strong> · {risk.reason}
           <p>Deadline: {new Date(risk.deadline).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })} · {risk.daysAvailable} days available{risk.estimatedDays === null ? "" : ` · ${risk.estimatedDays} estimated days remaining`}</p>
         </article>)}</div>
+        {risks.showPager && <Pager {...risks.pagerProps} />}
       </section>
       <section className="production-panel">
         <h2>Yarn reorder suggestions</h2>

@@ -1,7 +1,8 @@
 "use client";
 import { useApi } from "@/lib/useApi";
 import { dateTimeIN } from "@/lib/accounts/format";
-import { EmptyState } from "@/components/ui";
+import { EmptyState, Pager } from "@/components/ui";
+import { usePaged } from "@/lib/usePaged";
 import { Section } from "./controls";
 
 interface Entry {
@@ -31,6 +32,7 @@ export function humanizeAction(action: string): string {
 export function ActivityPanel() {
   const { data, error, refetch } = useApi<{ activity: Entry[] }>("/api/me/activity");
   const rows = data?.activity ?? [];
+  const paged = usePaged(rows, 10);
   return (
     <Section title="Your recent activity" description="The last 30 changes made under your account, from the mill's audit trail.">
       {error && (
@@ -43,7 +45,7 @@ export function ActivityPanel() {
       )}
       {!data && !error && <p className="px-5 py-4 text-[13px] text-gray-500">Loading…</p>}
       {data && rows.length === 0 && <EmptyState title="Nothing yet" description="Changes you make — orders, dispatches, payments, profile edits — will appear here." />}
-      {rows.map((r) => (
+      {paged.pageRows.map((r) => (
         <div key={r.id} className="flex items-baseline justify-between gap-4 px-5 py-3 text-[13px]">
           <div className="min-w-0">
             <p className="font-medium text-foreground">{humanizeAction(r.action)}</p>
@@ -56,6 +58,11 @@ export function ActivityPanel() {
           </time>
         </div>
       ))}
+      {paged.showPager && (
+        <div className="px-5 py-3">
+          <Pager {...paged.pagerProps} />
+        </div>
+      )}
     </Section>
   );
 }

@@ -24,7 +24,6 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [queuedItems, setQueuedItems] = useState<QueuedMutation[]>([]);
   const [isRestoring, setIsRestoring] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -89,8 +88,25 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
     await refreshQueue();
   };
 
-  const handleBackup = () => {
-    window.location.href = "/api/backup";
+  // Fetch first so a refusal (e.g. 501 on Postgres, 403) shows a message
+  // instead of navigating the whole app to a raw JSON error page.
+  const handleBackup = async () => {
+    try {
+      const res = await fetch("/api/backup");
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(`Backup failed: ${data?.error || `HTTP ${res.status}`}`);
+        return;
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `threadline-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Backup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -103,7 +119,6 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
     }
 
     setIsRestoring(true);
-    setStatusMessage(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -120,8 +135,8 @@ export function SyncStatus({ canBackup, userId }: { canBackup: boolean; userId: 
       } else {
         alert(`Restore failed: ${data.error || "Unknown error"}`);
       }
-    } catch (err: any) {
-      alert(`Restore failed: ${err.message}`);
+    } catch (err) {
+      alert(`Restore failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsRestoring(false);
       e.target.value = "";

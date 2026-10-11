@@ -2,7 +2,7 @@ declare module "jsqr" {
   export interface QRCode {
     binaryData: number[];
     data: string;
-    chunks: any[];
+    chunks: unknown[];
     location: {
       topRightCorner: { x: number; y: number };
       topLeftCorner: { x: number; y: number };

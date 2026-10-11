@@ -654,12 +654,14 @@ const ORDER_MARGINS_PAGE_SIZE = 20;
 
 function OrderMargins({ data, loading, error, retry, flash }: { data: Costs | null; loading: boolean; error: string | null; retry: () => void; flash: boolean }) {
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
+  const [requestedPage, setPage] = useState(1);
   const rows = useMemo(() => {
     const all = [...(data?.realised ?? []), ...(data?.inProgress ?? [])];
     const q = query.trim().toLowerCase();
     return q ? all.filter((o) => `${o.orderNo} ${o.buyerName} ${o.fabric}`.toLowerCase().includes(q)) : all;
   }, [data, query]);
+  // A realtime refetch can shrink the list under the reader; never land past the end.
+  const page = Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / ORDER_MARGINS_PAGE_SIZE)));
   // Only the current page's rows ever hit the DOM — the full filtered set
   // still backs the aggregate totals and CSV export below.
   const pagedRows = useMemo(

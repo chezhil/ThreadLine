@@ -8,29 +8,56 @@ import { productionActor } from "@/lib/production/auth";
 import { fieldError, jsonBody, problem } from "@/lib/production/http";
 import { refreshProductionAlerts } from "@/lib/production/insights";
 import { applyProductionStarted, recordStatusChanges } from "@/lib/order-status";
+import { parsePageParams } from "@/lib/pagination";
+import type { Prisma } from "@prisma/client";
 
 const machineTypeForStage = { spinning: "spinning", weaving: "loom", dyeing: "dyeing" } as const;
 const previousStage = { spinning: null, weaving: "spinning", dyeing: "weaving" } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   const actor = await productionActor();
   if ("response" in actor) return actor.response;
-  const [workOrders, orders, machines] = await Promise.all([
+  // Opt-in paging (see lib/pagination.ts): `?page=` with optional `search`
+  // (order no or machine) and `status`. The work-orders page uses it — the
+  // full list ran past a thousand rows — and then also gets the open work
+  // orders on their own for its "record output" dropdown.
+  const { searchParams } = new URL(request.url);
+  const { paginated, page, pageSize, skip, take } = parsePageParams(searchParams);
+  const search = searchParams.get("search")?.trim();
+  const status = searchParams.get("status");
+  const where: Prisma.WorkOrderWhereInput = {
+    ...(status && ["PLANNED", "IN_PROGRESS", "COMPLETED"].includes(status) ? { status } : {}),
+    ...(search
+      ? { OR: [{ order: { orderNo: { contains: search, mode: "insensitive" } } }, { machine: { name: { contains: search, mode: "insensitive" } } }] }
+      : {}),
+  };
+  const [workOrders, orders, machines, total, activeWorkOrders] = await Promise.all([
     db.workOrder.findMany({
+      where,
       include: {
         order: { select: { orderNo: true, status: true } },
         machine: { select: { id: true, name: true, status: true } },
         _count: { select: { productionLogs: true, rolls: true } },
       },
       orderBy: { startedAt: "desc" },
+      ...(paginated ? { skip, take } : {}),
     }),
     db.order.findMany({
       where: { status: { not: "CLOSED" }, OR: [{ status: "CONFIRMED" }, { productionStatus: "IN_PRODUCTION" }] },
       select: { id: true, orderNo: true, status: true, qtyMetres: true },
     }),
     db.machine.findMany({ select: { id: true, name: true, type: true, status: true } }),
+    paginated ? db.workOrder.count({ where }) : null,
+    paginated
+      ? db.workOrder.findMany({
+          where: { status: { not: "COMPLETED" } },
+          select: { id: true, stage: true, order: { select: { orderNo: true } }, machine: { select: { name: true } } },
+          orderBy: { startedAt: "desc" },
+        })
+      : null,
   ]);
-  return NextResponse.json({ workOrders, orders, machines });
+  if (!paginated) return NextResponse.json({ workOrders, orders, machines });
+  return NextResponse.json({ workOrders, orders, machines, activeWorkOrders, total, page, pageSize });
 }
 
 export async function POST(request: Request) {
